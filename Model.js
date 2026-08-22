@@ -71,8 +71,8 @@ function connectionInScope(conn, scope) {
   if (value === "all" || value === "") return true
   if (value === "established") return conn.state === "estab"
   if (value === "listening") return conn.state === "listen"
-  if (value === "internet") return conn.internetFacing === true || (conn.state === "estab" && conn.class === "internet")
-  if (value === "local") return !(conn.internetFacing === true || (conn.state === "estab" && conn.class === "internet"))
+  if (value === "internet") return conn.class === "internet" || conn.internetFacing === true
+  if (value === "local") return !(conn.class === "internet" || conn.internetFacing === true)
   return true
 }
 

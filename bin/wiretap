@@ -273,6 +273,28 @@ def service_name(port: int | str, services: dict[int, str] | None = None) -> str
     return table.get(port, "")
 
 
+def split_ss_meta(tokens: list[str]) -> tuple[list[str], str]:
+    for i, tok in enumerate(tokens):
+        low = tok.lower()
+        if low.startswith(("users:", "uid:", "ino:", "cgroup:", "timer:")):
+            return tokens[:i], " ".join(tokens[i:])
+    return tokens, ""
+
+
+def parse_unix_endpoints(tokens: list[str]) -> tuple | None:
+    """ss -x: local path, local inode, peer path, peer inode, then metadata."""
+    fields, meta = split_ss_meta(tokens)
+    if len(fields) < 4:
+        return None
+    local_addr = fields[0]
+    remote_addr = fields[2]
+    try:
+        inode = int(fields[1])
+    except ValueError:
+        inode = None
+    return local_addr, 0, remote_addr, 0, inode, "unix", "", meta
+
+
 def parse_info_line(line: str) -> dict:
     sent = BYTES_SENT_RE.search(line)
     recv = BYTES_RECV_RE.search(line)
@@ -315,31 +337,35 @@ def parse_socket_line(line: str, default_netid: str | None = None) -> dict | Non
         return None
     idx += 2
 
-    remainder = " ".join(tokens[idx:])
-    endpoints = ENDPOINT_RE.findall(remainder)
-    if len(endpoints) < 2:
-        return None
-    local_tok, remote_tok = endpoints[0], endpoints[1]
-    meta = remainder
-    # Meta starts after the two endpoint tokens; find the second occurrence carefully.
-    first_end = remainder.find(local_tok)
-    second_at = remainder.find(remote_tok, first_end + len(local_tok))
-    if second_at >= 0:
-        meta = remainder[second_at + len(remote_tok) :].strip()
-
-    local_addr, local_port, local_iface, family = parse_endpoint(local_tok)
-    remote_addr, remote_port, remote_iface, remote_family = parse_endpoint(remote_tok)
-    if remote_family == "inet6" or family == "inet6":
-        family = "inet6"
-    iface = local_iface or remote_iface
-
     protocol = netid or "tcp"
-    if protocol in ("tcp6", "udp6"):
-        family = "inet6"
-        protocol = protocol[:-1]
-    if protocol in UNIX_NETIDS:
+    is_unix = protocol in UNIX_NETIDS
+    if is_unix:
+        parsed_unix = parse_unix_endpoints(tokens[idx:])
+        if parsed_unix is None:
+            return None
+        local_addr, local_port, remote_addr, remote_port, inode, family, iface, meta = parsed_unix
         protocol = "unix"
-        family = "unix"
+    else:
+        remainder = " ".join(tokens[idx:])
+        endpoints = ENDPOINT_RE.findall(remainder)
+        if len(endpoints) < 2:
+            return None
+        local_tok, remote_tok = endpoints[0], endpoints[1]
+        meta = remainder
+        first_end = remainder.find(local_tok)
+        second_at = remainder.find(remote_tok, first_end + len(local_tok))
+        if second_at >= 0:
+            meta = remainder[second_at + len(remote_tok) :].strip()
+
+        local_addr, local_port, local_iface, family = parse_endpoint(local_tok)
+        remote_addr, remote_port, remote_iface, remote_family = parse_endpoint(remote_tok)
+        if remote_family == "inet6" or family == "inet6":
+            family = "inet6"
+        iface = local_iface or remote_iface
+        inode = None
+        if protocol in ("tcp6", "udp6"):
+            family = "inet6"
+            protocol = protocol[:-1]
 
     users = USERS_RE.search(meta)
     uid_m = UID_RE.search(meta)
@@ -350,14 +376,11 @@ def parse_socket_line(line: str, default_netid: str | None = None) -> dict | Non
     comm = users.group(1) if users else ""
     fd = int(users.group(3)) if users else None
     uid = int(uid_m.group(1)) if uid_m else None
-    inode = int(ino_m.group(1)) if ino_m else None
+    if inode is None and ino_m:
+        inode = int(ino_m.group(1))
     cgroup = unescape_cgroup(cgroup_m.group(1)) if cgroup_m else ""
 
-    klass = classify_address(remote_addr)
-    if state == "listen":
-        # LISTEN remotes are unspecified; class the local bind instead for display,
-        # but keep remote class as unspecified. internetFacing uses localAddress.
-        pass
+    klass = classify_address(local_addr) if state == "listen" else classify_address(remote_addr)
 
     conn = {
         "protocol": protocol,
@@ -751,12 +774,14 @@ def collect_sockets(
     error = ""
     sockets: list[dict] = []
 
+    skip_followup = False
     if tunep_text is None:
         code, out, err = run_ss(["-H", "-a", "-tunep"], ss_bin=ss_bin)
         if code == 127:
             return [], warnings, "iproute2 ss is not on PATH"
         if code == 124:
             error = "ss timed out"
+            skip_followup = True
         elif code not in (0, 124) and not out.strip():
             error = (err.strip() or "ss failed") if err else "ss failed"
         tunep_text = out
@@ -766,24 +791,30 @@ def collect_sockets(
     sockets = parse_ss_output(tunep_text or "")
 
     if info_text is None:
-        code, out, err = run_ss(["-H", "-a", "-tnep", "-i"], ss_bin=ss_bin)
-        if code == 0:
-            info_text = out
-        elif code not in (127,):
-            warnings.append("tcp info unavailable")
+        if skip_followup:
             info_text = ""
         else:
-            info_text = ""
+            code, out, err = run_ss(["-H", "-a", "-tnep", "-i"], ss_bin=ss_bin)
+            if code == 0:
+                info_text = out
+            elif code not in (127,):
+                warnings.append("tcp info unavailable")
+                info_text = ""
+            else:
+                info_text = ""
     if info_text:
         info_sockets = parse_ss_output(info_text, default_netid="tcp")
         sockets = join_info(sockets, info_sockets)
 
     if include_unix:
         if unix_text is None:
-            code, out, err = run_ss(["-H", "-a", "-xnp"], ss_bin=ss_bin)
-            unix_text = out if code in (0,) else ""
-            if code not in (0, 127):
-                warnings.append("unix sockets unavailable")
+            if skip_followup:
+                unix_text = ""
+            else:
+                code, out, err = run_ss(["-H", "-a", "-xnp"], ss_bin=ss_bin)
+                unix_text = out if code in (0,) else ""
+                if code not in (0, 127):
+                    warnings.append("unix sockets unavailable")
         if unix_text:
             sockets.extend(parse_ss_output(unix_text))
 

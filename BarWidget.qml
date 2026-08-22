@@ -81,11 +81,31 @@ BarWidget {
     root.appearedIds = delta.appearedIds
     root.newProcessKeys = delta.newProcessKeys
     root.usingLastGood = !!fromError
-    if (delta.appearedInternetEstab) {
+    if (!fromError && delta.appearedInternetEstab) {
       root.pulsing = true
       pulseTimer.restart()
     }
     injectPanel()
+  }
+
+  function applySnapshotResult(exitCode) {
+    var next = Model.parseSnapshot(root.lastOutput)
+    if (next && next.error && root.lastError === "") root.lastError = String(next.error)
+    if (exitCode === 0 && next) {
+      root.adoptSnapshot(next, false)
+      return
+    }
+    if (next && Model.socketCount(next) > 0) {
+      root.adoptSnapshot(next, true)
+      return
+    }
+    if (Model.socketCount(root.snapshot) > 0) {
+      root.usingLastGood = true
+      if (root.lastError === "") root.lastError = "ss failed"
+      return
+    }
+    if (next) root.adoptSnapshot(next, true)
+    else if (root.lastError === "") root.lastError = "ss failed"
   }
 
   function refresh() {
@@ -170,11 +190,7 @@ BarWidget {
     id: snapshotProc
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: {
-        root.lastOutput = String(text || "")
-        var next = Model.parseSnapshot(root.lastOutput)
-        if (next) root.adoptSnapshot(next, false)
-      }
+      onStreamFinished: root.lastOutput = String(text || "")
     }
     stderr: StdioCollector {
       waitForEnd: true
@@ -184,26 +200,22 @@ BarWidget {
       watchdog.stop()
       root.lastExitCode = exitCode
       root.refreshing = false
-      if (exitCode > 0) {
-        var next = Model.parseSnapshot(root.lastOutput)
-        if (next) root.adoptSnapshot(next, true)
-        else root.usingLastGood = Model.socketCount(root.snapshot) > 0
-        if (root.lastError === "" && next && next.error) root.lastError = String(next.error)
-      }
+      root.applySnapshotResult(exitCode)
       root.injectPanel()
     }
   }
 
   Timer {
     id: watchdog
-    interval: 750
+    interval: 3000
     repeat: false
     onTriggered: {
       if (!snapshotProc.running) return
       snapshotProc.running = false
       root.refreshing = false
-      root.usingLastGood = Model.socketCount(root.snapshot) > 0
+      root.lastExitCode = 124
       root.lastError = root.lastError || "ss timed out"
+      if (Model.socketCount(root.snapshot) > 0) root.usingLastGood = true
       root.injectPanel()
     }
   }

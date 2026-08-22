@@ -122,6 +122,47 @@ TestCase {
     compare(Model.visibleRows(snap, "", "local", ["pid:20:1"], [], []).length, 2)
   }
 
+  function test_internetScopeIncludesPublicTimeWait() {
+    var snap = {
+      version: 1,
+      totals: {},
+      processes: [
+        {
+          key: "p",
+          displayName: "x",
+          connections: [
+            {
+              id: "tw",
+              protocol: "tcp",
+              state: "time-wait",
+              localAddress: "10.10.5.90",
+              localPort: 40122,
+              remoteAddress: "1.1.1.1",
+              remotePort: 443,
+              class: "internet",
+              internetFacing: false
+            },
+            {
+              id: "syn",
+              protocol: "tcp",
+              state: "syn-sent",
+              localAddress: "10.10.5.90",
+              localPort: 9,
+              remoteAddress: "8.8.8.8",
+              remotePort: 53,
+              class: "internet",
+              internetFacing: false
+            }
+          ]
+        }
+      ]
+    }
+    compare(Model.visibleRows(snap, "", "internet", ["p"], [], []).length, 3)
+    compare(Model.visibleRows(snap, "", "local", ["p"], [], []).length, 0)
+    compare(Model.connectionInScope(snap.processes[0].connections[0], "internet"), true)
+    compare(Model.connectionInScope(snap.processes[0].connections[0], "local"), false)
+  }
+
   function test_diffMarksNewInternetEstab() {
     var prev = Model.emptySnapshot()
     var next = sampleSnapshot()

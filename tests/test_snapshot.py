@@ -74,10 +74,11 @@ class ParseSsTests(unittest.TestCase):
         self.assertEqual(len(sockets), 15)
         listen = [s for s in sockets if s["state"] == "listen"]
         self.assertGreaterEqual(len(listen), 4)
-        ssh = next(s for s in sockets if s["localPort"] == 22 and s["family"] == "inet")
-        self.assertEqual(ssh["pid"], None)
-        self.assertTrue(ssh["system"])
-        self.assertEqual(wt.cgroup_unit(ssh["cgroup"]), "sshd")
+        sshd = next(s for s in sockets if s["localPort"] == 22 and s["family"] == "inet")
+        self.assertEqual(sshd["pid"], None)
+        self.assertTrue(sshd["system"])
+        self.assertEqual(wt.cgroup_unit(sshd["cgroup"]), "sshd")
+        self.assertEqual(sshd["class"], "unspecified")
         chrome = next(s for s in sockets if s["inode"] == 864218)
         self.assertEqual(chrome["comm"], "chromium")
         self.assertEqual(chrome["pid"], 37143)
@@ -91,7 +92,10 @@ class ParseSsTests(unittest.TestCase):
         self.assertEqual(unb["localAddress"], "::")
         cups = next(s for s in sockets if s["localPort"] == 631)
         self.assertEqual(cups["localAddress"], "::1")
+        self.assertEqual(cups["class"], "loopback")
         self.assertFalse(cups["internetFacing"])
+        lingering = next(s for s in sockets if s["state"] == "time-wait")
+        self.assertEqual(lingering["class"], "internet")
         mdns = next(s for s in sockets if s["remoteAddress"] == "0.0.0.0" and s["localPort"] == 5353)
         self.assertEqual(mdns["class"], "unspecified")
 
@@ -110,6 +114,19 @@ class ParseSsTests(unittest.TestCase):
         self.assertEqual(len(sockets), 3)
         self.assertTrue(all(s["pid"] is None for s in sockets))
         self.assertTrue(all(s["system"] for s in sockets))
+
+    def test_unix_columns(self):
+        sockets = wt.parse_ss_output(fixture("ss-unix.txt"))
+        self.assertEqual(len(sockets), 2)
+        wayland = next(s for s in sockets if s["localAddress"] == "/run/user/1000/wayland-1")
+        self.assertEqual(wayland["protocol"], "unix")
+        self.assertEqual(wayland["inode"], 20700)
+        self.assertEqual(wayland["remoteAddress"], "*")
+        self.assertEqual(wayland["comm"], "Hyprland")
+        self.assertEqual(wayland["pid"], 1360)
+        journal = next(s for s in sockets if "journal" in s["localAddress"])
+        self.assertEqual(journal["inode"], 1016)
+        self.assertEqual(journal["remoteAddress"], "*")
 
     def test_empty(self):
         self.assertEqual(wt.parse_ss_output(fixture("ss-empty.txt")), [])
@@ -186,8 +203,13 @@ class SnapshotFilterTests(unittest.TestCase):
             include_system=True,
             include_unconnected_udp=True,
         )
-        protos = {c["protocol"] for p in snap["processes"] for c in p["connections"]}
-        self.assertIn("unix", protos)
+        unix = [c for p in snap["processes"] for c in p["connections"] if c["protocol"] == "unix"]
+        self.assertTrue(unix)
+        wayland = next(c for c in unix if c["localAddress"] == "/run/user/1000/wayland-1")
+        self.assertEqual(wayland["inode"], 20700)
+        self.assertEqual(wayland["remoteAddress"], "*")
+        journal = next(c for c in unix if c["localAddress"] == "/run/systemd/journal/dev-log")
+        self.assertEqual(journal["inode"], 1016)
 
 
 class MissingSsTests(unittest.TestCase):
