@@ -1,0 +1,2 @@
+u_str ESTAB  0      0                                      /run/user/1000/wayland-1 20700  * 5917   users:(("Hyprland",pid=1360,fd=143))
+u_dgr UNCONN 0      0                                                       /run/systemd/journal/dev-log 1016   * 0

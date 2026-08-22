@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly PROJECT_ROOT
+QMLLINT="$(command -v qmllint 2>/dev/null || true)"
+readonly QMLLINT
+QMLTESTRUNNER="$(command -v qmltestrunner 2>/dev/null || true)"
+[[ -n "$QMLTESTRUNNER" ]] || QMLTESTRUNNER="/usr/lib/qt6/bin/qmltestrunner"
+readonly QMLTESTRUNNER
+LINT_IMPORT_ROOT="$(mktemp -d)"
+readonly LINT_IMPORT_ROOT
+mapfile -t QML_FILES < <(find "$PROJECT_ROOT" -maxdepth 1 -type f -name '*.qml' -print | sort)
+
+cleanup() {
+  rm -rf -- "$LINT_IMPORT_ROOT"
+}
+trap cleanup EXIT
+
+ln -s /usr/share/omarchy/shell "$LINT_IMPORT_ROOT/qs"
+
+python3 -m py_compile "$PROJECT_ROOT/bin/wiretap"
+python3 "$PROJECT_ROOT/tests/test_snapshot.py" -q
+jq -e . "$PROJECT_ROOT/manifest.json" >/dev/null
+[[ "$("$PROJECT_ROOT/bin/wiretap" --version)" == "$(jq -r '.version' "$PROJECT_ROOT/manifest.json")" ]]
+omarchy plugin validate "$PROJECT_ROOT"
+
+if [[ -n "$QMLLINT" ]]; then
+  if ! "$QMLLINT" -I "$LINT_IMPORT_ROOT" "${QML_FILES[@]}" >"$LINT_IMPORT_ROOT/qmllint.log" 2>&1; then
+    cat "$LINT_IMPORT_ROOT/qmllint.log" >&2
+    exit 1
+  fi
+elif [[ -x /usr/lib/qt6/bin/qmllint ]]; then
+  if ! /usr/lib/qt6/bin/qmllint -I "$LINT_IMPORT_ROOT" "${QML_FILES[@]}" >"$LINT_IMPORT_ROOT/qmllint.log" 2>&1; then
+    cat "$LINT_IMPORT_ROOT/qmllint.log" >&2
+    exit 1
+  fi
+else
+  printf 'qmllint not found\n' >&2
+  exit 1
+fi
+
+if [[ ! -x "$QMLTESTRUNNER" ]]; then
+  printf 'qmltestrunner not found\n' >&2
+  exit 1
+fi
+QT_QPA_PLATFORM=offscreen "$QMLTESTRUNNER" -input "$PROJECT_ROOT/tests/qml" -silent
+
+printf 'all tests: ok\n'

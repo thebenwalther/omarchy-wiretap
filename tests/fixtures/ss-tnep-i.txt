@@ -1,0 +1,6 @@
+ESTAB     0      0                       10.10.5.90:55514   140.82.113.25:443  users:(("chromium",pid=37143,fd=23)) uid:1000 ino:864218 sk:4457 cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/app-graphical.slice/app-Hyprland-chromium-a3d67ec7.scope <->
+ cubic wscale:10,10 rto:240 rtt:39.762/5.361 ato:40 mss:1424 cwnd:10 bytes_sent:22131 bytes_acked:22132 bytes_received:7939 segs_out:34
+LISTEN    0      128                        0.0.0.0:22            0.0.0.0:*    ino:11958 sk:8 cgroup:/system.slice/sshd.service <->
+ cubic cwnd:10
+ESTAB     0      0                       10.10.5.90:37172 199.165.136.101:443  ino:34840 sk:6001 cgroup:/system.slice/tailscaled.service <->
+ ts sack cubic wscale:10,10 bytes_sent:78894 bytes_received:18803

@@ -1,0 +1,15 @@
+udp UNCONN    0      0                    100.118.171.4:59620         0.0.0.0:*    users:(("ChatGPT",pid=11470,fd=71)) uid:1000 ino:74966 sk:203c cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/app-graphical.slice/app-Hyprland-gtk\x2dlaunch-c3344855.scope <->
+udp UNCONN    0      0                       172.17.0.1:53            0.0.0.0:*    uid:974 ino:17626 sk:1 cgroup:/system.slice/systemd-resolved.service <->
+udp UNCONN    0      0                    127.0.0.53%lo:53            0.0.0.0:*    uid:974 ino:17622 sk:3 cgroup:/system.slice/systemd-resolved.service <->
+udp ESTAB     0      0                  10.10.5.90%eno1:68          10.10.1.9:67   ino:21913 sk:2001 cgroup:/system.slice/NetworkManager.service <->
+udp UNCONN    0      0                      224.0.0.251:5353          0.0.0.0:*    users:(("ChatGPT",pid=11470,fd=63)) uid:1000 ino:67312 sk:203e cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/app-graphical.slice/app-Hyprland-gtk\x2dlaunch-c3344855.scope <->
+udp UNCONN    0      0      [fd7a:115c:a1e0::e136:ab05]:38769            [::]:*    users:(("ChatGPT",pid=11470,fd=72)) uid:1000 ino:74967 sk:6006 cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/app-graphical.slice/app-Hyprland-gtk\x2dlaunch-c3344855.scope v6only:1 <->
+tcp LISTEN    0      4096                       0.0.0.0:17500         0.0.0.0:*    users:(("dropbox",pid=2806,fd=75)) uid:1000 ino:14003 sk:4002 cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/app-graphical.slice/app-dropbox@autostart.service <->
+tcp LISTEN    0      128                        0.0.0.0:22            0.0.0.0:*    ino:11958 sk:8 cgroup:/system.slice/sshd.service <->
+tcp LISTEN    0      128                           [::]:22               [::]:*    ino:11960 sk:d cgroup:/system.slice/sshd.service v6only:1 <->
+tcp LISTEN    0      4096                         [::1]:631              [::]:*    ino:16240 sk:e cgroup:/system.slice/system-cups.slice/cups.service v6only:1 <->
+tcp LISTEN    0      128                            :::80                :::*     ino:80 sk:f cgroup:/system.slice/nginx.service <->
+tcp ESTAB     0      0                       10.10.5.90:55514   140.82.113.25:443  users:(("chromium",pid=37143,fd=23)) uid:1000 ino:864218 sk:4457 cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/app-graphical.slice/app-Hyprland-chromium-a3d67ec7.scope <->
+tcp ESTAB     0      0                       10.10.5.90:37172 199.165.136.101:443  ino:34840 sk:6001 cgroup:/system.slice/tailscaled.service <->
+tcp TIME-WAIT 0      0                       10.10.5.90:40122         1.1.1.1:443  uid:1000 ino:99999 sk:7 cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/app-graphical.slice/app-Hyprland-chromium-a3d67ec7.scope <->
+tcp ESTAB     0      0                       10.10.5.90:44321    10.10.1.9:22      users:(("ssh",pid=9001,fd=3),("ssh",pid=9001,fd=4)) uid:1000 ino:4242 sk:9 cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/app-ssh.scope <->

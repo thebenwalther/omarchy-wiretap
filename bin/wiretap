@@ -1,0 +1,873 @@
+#!/usr/bin/env python3
+"""Wiretap — snapshot every TCP/UDP socket grouped by the owning process."""
+
+from __future__ import annotations
+
+import argparse
+import ipaddress
+import json
+import os
+import pwd
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+VERSION = "1.0.0"
+SS_TIMEOUT = 0.6
+
+NETIDS = {
+    "tcp",
+    "tcp6",
+    "udp",
+    "udp6",
+    "raw",
+    "raw6",
+    "u_str",
+    "u_dgr",
+    "u_seq",
+    "icmp6",
+    "p_raw",
+}
+
+UNIX_NETIDS = {"u_str", "u_dgr", "u_seq"}
+
+HARD_SERVICES = {
+    22: "ssh",
+    25: "smtp",
+    53: "domain",
+    67: "bootps",
+    68: "bootpc",
+    80: "http",
+    123: "ntp",
+    137: "netbios-ns",
+    138: "netbios-dgm",
+    139: "netbios-ssn",
+    143: "imap",
+    443: "https",
+    465: "smtps",
+    587: "submission",
+    631: "ipp",
+    993: "imaps",
+    995: "pop3s",
+    3389: "rdp",
+    5353: "mdns",
+    5432: "postgresql",
+    5900: "vnc",
+    6443: "https",
+    6600: "mpd",
+    8080: "http-alt",
+    8443: "https-alt",
+    11434: "ollama",
+    17500: "dbxsvc",
+    17600: "dropbox",
+}
+
+USERS_RE = re.compile(
+    r'users:\(\("([^"]*)",pid=(\d+),fd=(\d+)\)'
+)
+UID_RE = re.compile(r"\buid:(\d+)")
+INO_RE = re.compile(r"\bino:(\d+)")
+CGROUP_RE = re.compile(r"\bcgroup:(\S+)")
+BYTES_SENT_RE = re.compile(r"\bbytes_sent:(\d+)")
+BYTES_RECV_RE = re.compile(r"\bbytes_received:(\d+)")
+HEX_ESCAPE_RE = re.compile(r"\\x([0-9A-Fa-f]{2})")
+
+# After recv-q/send-q: an IPv6 bracket endpoint, or a non-space token.
+ENDPOINT_RE = re.compile(r"(\[[^\]]+\](?::\S+)?|\S+)")
+
+STATE_ORDER = {
+    "listen": 0,
+    "estab": 1,
+    "syn-sent": 2,
+    "syn-recv": 3,
+    "fin-wait-1": 4,
+    "fin-wait-2": 5,
+    "close-wait": 6,
+    "closing": 7,
+    "last-ack": 8,
+    "time-wait": 9,
+    "unconn": 10,
+}
+
+
+def empty_snapshot(error: str = "", elapsed_ms: int = 0, warnings: list | None = None) -> dict:
+    return {
+        "version": 1,
+        "generatedAt": time.time(),
+        "elapsedMs": elapsed_ms,
+        "partial": bool(error),
+        "error": error,
+        "warnings": list(warnings or []),
+        "totals": {
+            "processes": 0,
+            "sockets": 0,
+            "established": 0,
+            "listen": 0,
+            "internet": 0,
+            "internetEstab": 0,
+            "udp": 0,
+            "tcp": 0,
+            "unowned": 0,
+        },
+        "processes": [],
+    }
+
+
+def unescape_cgroup(value: str) -> str:
+    return HEX_ESCAPE_RE.sub(lambda m: chr(int(m.group(1), 16)), value)
+
+
+def parse_port(token: str) -> int | str:
+    if token in ("", "*", "0"):
+        return "*" if token in ("", "*") else 0
+    try:
+        return int(token)
+    except ValueError:
+        return token
+
+
+def parse_endpoint(token: str) -> tuple[str, int | str, str, str]:
+    """Return (address, port, interface, family)."""
+    raw = (token or "").strip()
+    if raw in ("", "*", "*:*"):
+        return "*", "*", "", "inet"
+
+    iface = ""
+    family = "inet"
+
+    if raw.startswith("["):
+        close = raw.find("]")
+        if close == -1:
+            return raw, "*", "", "inet6"
+        host = raw[1:close]
+        rest = raw[close + 1 :]
+        if "%" in host:
+            host, iface = host.split("%", 1)
+        port: int | str = "*"
+        if rest.startswith(":"):
+            port = parse_port(rest[1:])
+        return host or "::", port, iface, "inet6"
+
+    # Unbracketed IPv6 unspecified listen: :::80
+    if raw.startswith(":::"):
+        return "::", parse_port(raw[3:]), "", "inet6"
+    if raw == ":::*":
+        return "::", "*", "", "inet6"
+    if raw == "::":
+        return "::", "*", "", "inet6"
+
+    host = raw
+    port: int | str = "*"
+    if ":" in raw:
+        host, port_s = raw.rsplit(":", 1)
+        port = parse_port(port_s)
+
+    if "%" in host:
+        host, iface = host.split("%", 1)
+
+    if host.count(":") >= 2:
+        family = "inet6"
+    return host, port, iface, family
+
+
+def classify_address(addr: str) -> str:
+    value = (addr or "").strip()
+    if value in ("", "*", "0.0.0.0", "::", "::0"):
+        return "unspecified"
+    try:
+        ip = ipaddress.ip_address(value.split("%", 1)[0])
+    except ValueError:
+        return "unspecified"
+    if ip.is_loopback:
+        return "loopback"
+    if ip.is_link_local:
+        return "linklocal"
+    if ip.is_multicast:
+        return "multicast"
+    if ip.version == 4 and ip in ipaddress.ip_network("100.64.0.0/10"):
+        return "tailscale"
+    if ip.version == 4 and ip in ipaddress.ip_network("172.16.0.0/12"):
+        return "docker"
+    if ip.is_private:
+        return "private"
+    return "internet"
+
+
+def is_loopback_addr(addr: str) -> bool:
+    return classify_address(addr) == "loopback"
+
+
+def internet_facing(conn: dict) -> bool:
+    state = conn.get("state")
+    klass = conn.get("class")
+    if state == "estab" and klass == "internet":
+        return True
+    if state == "listen":
+        local_class = classify_address(conn.get("localAddress") or "")
+        if local_class == "loopback":
+            return False
+        return local_class in ("unspecified", "internet", "private", "docker", "tailscale")
+    return False
+
+
+def cgroup_unit(cgroup: str) -> str:
+    path = unescape_cgroup(cgroup or "").rstrip("/")
+    if not path:
+        return ""
+    name = path.split("/")[-1]
+    if name.endswith(".service") or name.endswith(".scope") or name.endswith(".slice"):
+        name = name.rsplit(".", 1)[0]
+    # app-Hyprland-chromium-a3d67ec7.scope already stripped to app-Hyprland-chromium-a3d67ec7
+    if name.startswith("app-"):
+        # app-Hyprland-chromium-a3d67ec7 or app-dropbox@autostart
+        body = name[4:]
+        if body.startswith("Hyprland-"):
+            body = body[len("Hyprland-") :]
+        body = body.split("@", 1)[0]
+        # chromium-a3d67ec7 → chromium
+        parts = body.split("-")
+        if parts:
+            body = parts[0]
+        return body
+    return name
+
+
+def is_system_cgroup(cgroup: str) -> bool:
+    path = unescape_cgroup(cgroup or "")
+    return path.startswith("/system.slice/") or path.startswith("system.slice/")
+
+
+def load_services(path: str | None = None) -> dict[int, str]:
+    services = dict(HARD_SERVICES)
+    services_path = Path(path or "/etc/services")
+    try:
+        text = services_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return services
+    for line in text.splitlines():
+        stripped = line.split("#", 1)[0].strip()
+        if not stripped:
+            continue
+        parts = stripped.split()
+        if len(parts) < 2 or "/" not in parts[1]:
+            continue
+        name, port_proto = parts[0], parts[1]
+        port_s, _, _proto = port_proto.partition("/")
+        try:
+            port = int(port_s)
+        except ValueError:
+            continue
+        services.setdefault(port, name)
+    return services
+
+
+_SERVICES: dict[int, str] | None = None
+
+
+def service_name(port: int | str, services: dict[int, str] | None = None) -> str:
+    if not isinstance(port, int) or port <= 0:
+        return ""
+    table = services if services is not None else _SERVICES or HARD_SERVICES
+    return table.get(port, "")
+
+
+def parse_info_line(line: str) -> dict:
+    sent = BYTES_SENT_RE.search(line)
+    recv = BYTES_RECV_RE.search(line)
+    info = {}
+    if sent:
+        info["bytesSent"] = int(sent.group(1))
+    if recv:
+        info["bytesReceived"] = int(recv.group(1))
+    return info
+
+
+def parse_socket_line(line: str, default_netid: str | None = None) -> dict | None:
+    raw = line.rstrip("\n")
+    if not raw.strip():
+        return None
+    if raw[:1] in " \t":
+        return {"_info": raw.strip()}
+
+    tokens = raw.split()
+    if len(tokens) < 5:
+        return None
+
+    idx = 0
+    netid = default_netid
+    first = tokens[0].lower()
+    if first in NETIDS:
+        netid = first
+        idx = 1
+    if idx >= len(tokens):
+        return None
+
+    state = tokens[idx].lower().replace("_", "-")
+    idx += 1
+    if idx + 1 >= len(tokens):
+        return None
+    try:
+        recv_q = int(tokens[idx])
+        send_q = int(tokens[idx + 1])
+    except ValueError:
+        return None
+    idx += 2
+
+    remainder = " ".join(tokens[idx:])
+    endpoints = ENDPOINT_RE.findall(remainder)
+    if len(endpoints) < 2:
+        return None
+    local_tok, remote_tok = endpoints[0], endpoints[1]
+    meta = remainder
+    # Meta starts after the two endpoint tokens; find the second occurrence carefully.
+    first_end = remainder.find(local_tok)
+    second_at = remainder.find(remote_tok, first_end + len(local_tok))
+    if second_at >= 0:
+        meta = remainder[second_at + len(remote_tok) :].strip()
+
+    local_addr, local_port, local_iface, family = parse_endpoint(local_tok)
+    remote_addr, remote_port, remote_iface, remote_family = parse_endpoint(remote_tok)
+    if remote_family == "inet6" or family == "inet6":
+        family = "inet6"
+    iface = local_iface or remote_iface
+
+    protocol = netid or "tcp"
+    if protocol in ("tcp6", "udp6"):
+        family = "inet6"
+        protocol = protocol[:-1]
+    if protocol in UNIX_NETIDS:
+        protocol = "unix"
+        family = "unix"
+
+    users = USERS_RE.search(meta)
+    uid_m = UID_RE.search(meta)
+    ino_m = INO_RE.search(meta)
+    cgroup_m = CGROUP_RE.search(meta)
+
+    pid = int(users.group(2)) if users else None
+    comm = users.group(1) if users else ""
+    fd = int(users.group(3)) if users else None
+    uid = int(uid_m.group(1)) if uid_m else None
+    inode = int(ino_m.group(1)) if ino_m else None
+    cgroup = unescape_cgroup(cgroup_m.group(1)) if cgroup_m else ""
+
+    klass = classify_address(remote_addr)
+    if state == "listen":
+        # LISTEN remotes are unspecified; class the local bind instead for display,
+        # but keep remote class as unspecified. internetFacing uses localAddress.
+        pass
+
+    conn = {
+        "protocol": protocol,
+        "family": family,
+        "state": state,
+        "localAddress": local_addr,
+        "localPort": local_port if isinstance(local_port, int) else (0 if local_port == "*" else local_port),
+        "remoteAddress": remote_addr,
+        "remotePort": remote_port if isinstance(remote_port, int) else (0 if remote_port == "*" else remote_port),
+        "interface": iface,
+        "inode": inode,
+        "fd": fd,
+        "bytesSent": None,
+        "bytesReceived": None,
+        "class": klass,
+        "service": "",
+        "pid": pid,
+        "comm": comm,
+        "uid": uid,
+        "cgroup": cgroup,
+        "recvQ": recv_q,
+        "sendQ": send_q,
+        "system": is_system_cgroup(cgroup),
+    }
+    conn["id"] = connection_id(conn)
+    conn["internetFacing"] = internet_facing(conn)
+    return conn
+
+
+def connection_id(conn: dict) -> str:
+    inode = conn.get("inode") if conn.get("inode") is not None else ""
+    return "|".join(
+        [
+            str(conn.get("protocol") or ""),
+            str(conn.get("localAddress") or ""),
+            str(conn.get("localPort") if conn.get("localPort") is not None else ""),
+            str(conn.get("remoteAddress") or ""),
+            str(conn.get("remotePort") if conn.get("remotePort") is not None else ""),
+            str(inode),
+        ]
+    )
+
+
+def parse_ss_output(text: str, default_netid: str | None = None) -> list[dict]:
+    sockets: list[dict] = []
+    current: dict | None = None
+    for line in (text or "").splitlines():
+        parsed = parse_socket_line(line, default_netid=default_netid)
+        if parsed is None:
+            continue
+        if "_info" in parsed:
+            if current is not None:
+                info = parse_info_line(parsed["_info"])
+                if "bytesSent" in info:
+                    current["bytesSent"] = info["bytesSent"]
+                if "bytesReceived" in info:
+                    current["bytesReceived"] = info["bytesReceived"]
+            continue
+        sockets.append(parsed)
+        current = parsed
+    return sockets
+
+
+def run_ss(args: list[str], ss_bin: str = "ss") -> tuple[int, str, str]:
+    try:
+        completed = subprocess.run(
+            [ss_bin, *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=SS_TIMEOUT,
+        )
+    except FileNotFoundError:
+        return 127, "", "ss not found"
+    except subprocess.TimeoutExpired:
+        return 124, "", "ss timed out"
+    return completed.returncode, completed.stdout or "", completed.stderr or ""
+
+
+def join_info(base: list[dict], info_sockets: list[dict]) -> list[dict]:
+    by_inode: dict[int, dict] = {}
+    by_tuple: dict[tuple, dict] = {}
+    for sock in info_sockets:
+        inode = sock.get("inode")
+        if isinstance(inode, int):
+            by_inode[inode] = sock
+        by_tuple[info_key(sock)] = sock
+    for sock in base:
+        extra = None
+        inode = sock.get("inode")
+        if isinstance(inode, int) and inode in by_inode:
+            extra = by_inode[inode]
+        elif info_key(sock) in by_tuple:
+            extra = by_tuple[info_key(sock)]
+        if extra is None:
+            continue
+        if extra.get("bytesSent") is not None:
+            sock["bytesSent"] = extra["bytesSent"]
+        if extra.get("bytesReceived") is not None:
+            sock["bytesReceived"] = extra["bytesReceived"]
+    return base
+
+
+def info_key(sock: dict) -> tuple:
+    return (
+        sock.get("protocol"),
+        sock.get("localAddress"),
+        sock.get("localPort"),
+        sock.get("remoteAddress"),
+        sock.get("remotePort"),
+    )
+
+
+def read_proc_file(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def enrich_pid(pid: int, proc_root: str = "/proc") -> dict:
+    root = Path(proc_root) / str(pid)
+    comm = read_proc_file(root / "comm").strip()
+    cmdline_raw = ""
+    try:
+        cmdline_raw = (root / "cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+    except OSError:
+        pass
+    exe = ""
+    try:
+        exe = os.readlink(root / "exe")
+    except OSError:
+        pass
+    uid = None
+    status = read_proc_file(root / "status")
+    for line in status.splitlines():
+        if line.startswith("Uid:"):
+            parts = line.split()
+            if len(parts) > 1:
+                try:
+                    uid = int(parts[1])
+                except ValueError:
+                    uid = None
+            break
+    start_time = 0
+    stat = read_proc_file(root / "stat")
+    if stat:
+        close = stat.rfind(")")
+        rest = stat[close + 2 :].split() if close != -1 else stat.split()
+        # After comm, fields: state ppid ... starttime is field 20 of /proc/pid/stat
+        # which is index 19 after the comm-close split's remainder (0-based: 19).
+        # remainder starts at field 3 (state), so starttime (field 22) is index 19.
+        if len(rest) >= 20:
+            try:
+                start_time = int(rest[19])
+            except ValueError:
+                start_time = 0
+    return {
+        "comm": comm,
+        "cmdline": cmdline_raw,
+        "exe": exe,
+        "uid": uid,
+        "startTime": start_time,
+    }
+
+
+def username_for(uid: int | None) -> str:
+    if uid is None:
+        return ""
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except (KeyError, OverflowError, TypeError):
+        return str(uid)
+
+
+def display_name_for(exe: str, comm: str, cgroup: str) -> str:
+    if exe:
+        base = Path(exe).name
+        if base and base not in ("python", "python3", "bash", "sh", "dash", "perl", "ruby", "node"):
+            return base
+    if comm:
+        return comm
+    label = cgroup_unit(cgroup)
+    return label or "unknown"
+
+
+def desktop_hint_for(exe: str, comm: str, display: str) -> str:
+    for candidate in (display, comm, Path(exe).name if exe else ""):
+        value = str(candidate or "").strip().lower()
+        if value:
+            return value
+    return ""
+
+
+def process_key(pid: int | None, start_time: int, uid: int | None, cgroup: str) -> str:
+    if pid is not None:
+        return f"pid:{pid}:{start_time}"
+    unit = cgroup_unit(cgroup) or "unowned"
+    uid_part = uid if uid is not None else "none"
+    return f"uid:{uid_part}:cgroup:{unit}"
+
+
+def should_keep(conn: dict, include_unix: bool, include_system: bool, include_unconnected_udp: bool) -> bool:
+    if conn.get("protocol") == "unix" and not include_unix:
+        return False
+    if conn.get("system") and not include_system:
+        return False
+    if (
+        not include_unconnected_udp
+        and conn.get("protocol") == "udp"
+        and conn.get("state") == "unconn"
+    ):
+        return False
+    return True
+
+
+def connection_sort_key(conn: dict) -> tuple:
+    state = conn.get("state") or ""
+    internet = 0 if conn.get("class") == "internet" else 1
+    return (
+        STATE_ORDER.get(state, 50),
+        internet,
+        str(conn.get("protocol") or ""),
+        str(conn.get("remoteAddress") or ""),
+        str(conn.get("remotePort") or ""),
+        str(conn.get("localPort") or ""),
+    )
+
+
+def public_connection(conn: dict, services: dict[int, str]) -> dict:
+    local_port = conn.get("localPort")
+    remote_port = conn.get("remotePort")
+    service = ""
+    if isinstance(remote_port, int):
+        service = service_name(remote_port, services)
+    if not service and isinstance(local_port, int):
+        service = service_name(local_port, services)
+    return {
+        "id": conn.get("id") or connection_id(conn),
+        "protocol": conn.get("protocol"),
+        "family": conn.get("family"),
+        "state": conn.get("state"),
+        "localAddress": conn.get("localAddress"),
+        "localPort": local_port if isinstance(local_port, int) else 0,
+        "remoteAddress": conn.get("remoteAddress"),
+        "remotePort": remote_port if isinstance(remote_port, int) else 0,
+        "interface": conn.get("interface") or "",
+        "inode": conn.get("inode"),
+        "fd": conn.get("fd"),
+        "bytesSent": conn.get("bytesSent"),
+        "bytesReceived": conn.get("bytesReceived"),
+        "class": conn.get("class"),
+        "service": service,
+        "internetFacing": bool(conn.get("internetFacing")),
+    }
+
+
+def build_snapshot(
+    sockets: list[dict],
+    *,
+    include_unix: bool = False,
+    include_system: bool = False,
+    include_unconnected_udp: bool = False,
+    proc_root: str = "/proc",
+    services: dict[int, str] | None = None,
+    elapsed_ms: int = 0,
+    warnings: list | None = None,
+    error: str = "",
+    enrich: bool = True,
+) -> dict:
+    table = services if services is not None else HARD_SERVICES
+    kept = [s for s in sockets if should_keep(s, include_unix, include_system, include_unconnected_udp)]
+
+    groups: dict[str, dict] = {}
+    pid_cache: dict[int, dict] = {}
+
+    for sock in kept:
+        pid = sock.get("pid")
+        extra = {}
+        if enrich and isinstance(pid, int) and pid > 0:
+            if pid not in pid_cache:
+                pid_cache[pid] = enrich_pid(pid, proc_root)
+            extra = pid_cache[pid]
+
+        comm = extra.get("comm") or sock.get("comm") or ""
+        exe = extra.get("exe") or ""
+        cmdline = extra.get("cmdline") or ""
+        start_time = int(extra.get("startTime") or 0)
+        uid = extra.get("uid") if extra.get("uid") is not None else sock.get("uid")
+        cgroup = sock.get("cgroup") or ""
+        key = process_key(pid if isinstance(pid, int) else None, start_time, uid, cgroup)
+        if key not in groups:
+            display = display_name_for(exe, comm, cgroup)
+            groups[key] = {
+                "key": key,
+                "pid": pid if isinstance(pid, int) else 0,
+                "startTime": start_time,
+                "comm": comm,
+                "exe": exe,
+                "cmdline": cmdline,
+                "displayName": display,
+                "desktopHint": desktop_hint_for(exe, comm, display),
+                "uid": uid if uid is not None else 0,
+                "user": username_for(uid),
+                "cgroup": cgroup_unit(cgroup) or cgroup,
+                "system": bool(sock.get("system")),
+                "bytesSent": 0,
+                "bytesReceived": 0,
+                "connections": [],
+            }
+        proc = groups[key]
+        pub = public_connection(sock, table)
+        proc["connections"].append(pub)
+        if isinstance(pub.get("bytesSent"), int):
+            proc["bytesSent"] += pub["bytesSent"]
+        if isinstance(pub.get("bytesReceived"), int):
+            proc["bytesReceived"] += pub["bytesReceived"]
+
+    processes = list(groups.values())
+    for proc in processes:
+        proc["connections"].sort(key=connection_sort_key)
+        if proc["bytesSent"] == 0:
+            proc["bytesSent"] = None
+        if proc["bytesReceived"] == 0:
+            proc["bytesReceived"] = None
+        if proc["displayName"] in ("", "unknown") and not proc.get("pid"):
+            states = {c.get("state") for c in proc["connections"]}
+            if states and states <= {"time-wait", "close", "last-ack", "closing"}:
+                proc["displayName"] = "lingering"
+
+    def process_sort_key(proc: dict) -> tuple:
+        internet_estab = sum(
+            1
+            for c in proc["connections"]
+            if c.get("state") == "estab" and c.get("class") == "internet"
+        )
+        return (
+            1 if proc.get("system") else 0,
+            -internet_estab,
+            -len(proc["connections"]),
+            str(proc.get("displayName") or "").lower(),
+        )
+
+    processes.sort(key=process_sort_key)
+
+    totals = {
+        "processes": len(processes),
+        "sockets": len(kept),
+        "established": 0,
+        "listen": 0,
+        "internet": 0,
+        "internetEstab": 0,
+        "udp": 0,
+        "tcp": 0,
+        "unowned": 0,
+    }
+    for sock in kept:
+        proto = sock.get("protocol")
+        state = sock.get("state")
+        if proto == "tcp":
+            totals["tcp"] += 1
+        elif proto == "udp":
+            totals["udp"] += 1
+        if state == "estab":
+            totals["established"] += 1
+        if state == "listen":
+            totals["listen"] += 1
+        if sock.get("internetFacing"):
+            totals["internet"] += 1
+        if state == "estab" and sock.get("class") == "internet":
+            totals["internetEstab"] += 1
+        if sock.get("pid") is None:
+            totals["unowned"] += 1
+
+    snap = empty_snapshot(error=error, elapsed_ms=elapsed_ms, warnings=warnings)
+    snap["partial"] = bool(error)
+    snap["totals"] = totals
+    snap["processes"] = processes
+    return snap
+
+
+def collect_sockets(
+    *,
+    ss_bin: str = "ss",
+    tunep_text: str | None = None,
+    info_text: str | None = None,
+    unix_text: str | None = None,
+    include_unix: bool = False,
+) -> tuple[list[dict], list[str], str]:
+    warnings: list[str] = []
+    error = ""
+    sockets: list[dict] = []
+
+    if tunep_text is None:
+        code, out, err = run_ss(["-H", "-a", "-tunep"], ss_bin=ss_bin)
+        if code == 127:
+            return [], warnings, "iproute2 ss is not on PATH"
+        if code == 124:
+            error = "ss timed out"
+        elif code not in (0, 124) and not out.strip():
+            error = (err.strip() or "ss failed") if err else "ss failed"
+        tunep_text = out
+        if err.strip() and code not in (0,):
+            warnings.append(err.strip())
+
+    sockets = parse_ss_output(tunep_text or "")
+
+    if info_text is None:
+        code, out, err = run_ss(["-H", "-a", "-tnep", "-i"], ss_bin=ss_bin)
+        if code == 0:
+            info_text = out
+        elif code not in (127,):
+            warnings.append("tcp info unavailable")
+            info_text = ""
+        else:
+            info_text = ""
+    if info_text:
+        info_sockets = parse_ss_output(info_text, default_netid="tcp")
+        sockets = join_info(sockets, info_sockets)
+
+    if include_unix:
+        if unix_text is None:
+            code, out, err = run_ss(["-H", "-a", "-xnp"], ss_bin=ss_bin)
+            unix_text = out if code in (0,) else ""
+            if code not in (0, 127):
+                warnings.append("unix sockets unavailable")
+        if unix_text:
+            sockets.extend(parse_ss_output(unix_text))
+
+    return sockets, warnings, error
+
+
+def snapshot_from_sources(**kwargs) -> dict:
+    started = time.perf_counter()
+    include_unix = bool(kwargs.get("include_unix"))
+    include_system = bool(kwargs.get("include_system"))
+    include_unconnected_udp = bool(kwargs.get("include_unconnected_udp"))
+    sockets, warnings, error = collect_sockets(
+        ss_bin=kwargs.get("ss_bin") or "ss",
+        tunep_text=kwargs.get("tunep_text"),
+        info_text=kwargs.get("info_text"),
+        unix_text=kwargs.get("unix_text"),
+        include_unix=include_unix,
+    )
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    services = kwargs.get("services")
+    if services is None:
+        global _SERVICES
+        if _SERVICES is None:
+            _SERVICES = load_services(kwargs.get("services_path"))
+        services = _SERVICES
+    return build_snapshot(
+        sockets,
+        include_unix=include_unix,
+        include_system=include_system,
+        include_unconnected_udp=include_unconnected_udp,
+        proc_root=kwargs.get("proc_root") or "/proc",
+        services=services,
+        elapsed_ms=elapsed_ms,
+        warnings=warnings,
+        error=error,
+        enrich=kwargs.get("enrich", True),
+    )
+
+
+def write_snapshot(snap: dict, pretty: bool, output: str | None) -> None:
+    indent = 2 if pretty else None
+    payload = json.dumps(snap, indent=indent, ensure_ascii=True) + ("\n" if pretty else "")
+    if output:
+        Path(output).write_text(payload if payload.endswith("\n") else payload + "\n", encoding="utf-8")
+        return
+    sys.stdout.write(payload if pretty else payload)
+    if not pretty:
+        sys.stdout.write("\n")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="wiretap",
+        description="Snapshot TCP/UDP sockets grouped by owning process.",
+    )
+    parser.add_argument("--version", action="store_true", help="print version and exit")
+    sub = parser.add_subparsers(dest="command")
+    snap = sub.add_parser("snapshot", help="emit one JSON snapshot")
+    snap.add_argument("--pretty", action="store_true", help="pretty-print JSON")
+    snap.add_argument("--include-unix", action="store_true", help="include Unix sockets")
+    snap.add_argument("--include-system", action="store_true", help="include system.slice sockets")
+    snap.add_argument("--include-unconnected-udp", action="store_true", help="include UNCONN UDP")
+    snap.add_argument("--output", metavar="FILE", help="write JSON to FILE instead of stdout")
+
+    args = parser.parse_args(argv)
+    if args.version:
+        sys.stdout.write(VERSION + "\n")
+        return 0
+    if args.command != "snapshot":
+        parser.print_help()
+        return 2
+
+    snap_doc = snapshot_from_sources(
+        include_unix=args.include_unix,
+        include_system=args.include_system,
+        include_unconnected_udp=args.include_unconnected_udp,
+    )
+    write_snapshot(snap_doc, pretty=args.pretty, output=args.output)
+    if snap_doc.get("error") == "iproute2 ss is not on PATH":
+        return 1
+    if snap_doc.get("error"):
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

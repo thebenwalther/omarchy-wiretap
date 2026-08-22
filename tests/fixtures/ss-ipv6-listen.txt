@@ -1,0 +1,4 @@
+tcp LISTEN    0      128                           [::]:22               [::]:*    ino:11960 sk:d cgroup:/system.slice/sshd.service v6only:1 <->
+tcp LISTEN    0      4096                         [::1]:631              [::]:*    ino:16240 sk:e cgroup:/system.slice/system-cups.slice/cups.service v6only:1 <->
+tcp ESTAB     0      0        [2001:db8::10]:40122      [2001:db8::1]:443  users:(("curl",pid=12,fd=4)) uid:1000 ino:7 sk:1 cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/app-curl.scope <->
+tcp LISTEN    0      128                            :::80                :::*     ino:80 sk:f cgroup:/system.slice/nginx.service <->
