@@ -14,7 +14,7 @@ import sys
 import time
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 SS_TIMEOUT = 0.6
 
 NETIDS = {

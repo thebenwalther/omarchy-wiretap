@@ -222,7 +222,7 @@ class MissingSsTests(unittest.TestCase):
 
 class VersionTests(unittest.TestCase):
     def test_version_constant(self):
-        self.assertEqual(wt.VERSION, "1.0.0")
+        self.assertEqual(wt.VERSION, "1.1.0")
 
     def test_main_version(self):
         self.assertEqual(wt.main(["--version"]), 0)

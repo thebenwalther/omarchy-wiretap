@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.thebenwalther.wiretap",
   "name": "Wiretap",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Ben Walther",
   "license": "MIT",
-  "description": "See every socket, grouped by the process that owns it.",
+  "description": "See who is talking. Connections grouped by the app that owns them.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Wiretap",
-    "description": "Network connections grouped by process.",
+    "description": "See who is talking, waiting, or finishing — grouped by app.",
     "category": "Network",
     "allowMultiple": false,
     "defaultSection": "right",
