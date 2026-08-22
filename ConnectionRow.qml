@@ -12,20 +12,24 @@ CursorSurface {
   property bool appeared: false
   property string fontFamily: Style.font.family
   property color dim: Qt.darker(foreground, 1.5)
+  property color urgent: Color.urgent
 
   signal activated()
   signal hovered()
 
-  readonly property string stateName: String(root.connection && root.connection.state || "")
-  readonly property color stateColor: {
-    if (root.stateName === "estab") return root.foreground
-    if (root.stateName === "listen") return root.accent
-    return root.dim
+  readonly property string tone: Model.connectionTone(root.connection)
+  readonly property color toneColor: {
+    if (root.tone === "talking") return root.accent
+    if (root.tone === "open" || root.tone === "connecting") return root.urgent
+    if (root.tone === "waiting") return root.accent
+    if (root.tone === "finishing" || root.tone === "idle") return root.dim
+    return root.foreground
   }
+  readonly property bool vivid: root.tone === "talking" || root.tone === "open" || root.tone === "connecting"
 
-  implicitHeight: Math.max(protoChip.implicitHeight, endpoint.implicitHeight) + Style.space(10)
-  fill: Util.alpha(accent, root.appeared ? 0.11 : 0.08)
-  currentFill: Util.alpha(accent, 0.11)
+  implicitHeight: headlines.implicitHeight + Style.space(12)
+  fill: Util.alpha(root.toneColor, root.appeared ? 0.14 : 0.06)
+  currentFill: Util.alpha(root.toneColor, 0.12)
   bordered: false
 
   Behavior on color { ColorAnimation { duration: 180 } }
@@ -44,87 +48,48 @@ CursorSurface {
     anchors.bottom: parent.bottom
     width: Math.max(2, Style.space(3))
     radius: width / 2
-    color: root.accent
+    color: root.toneColor
     opacity: root.hasCursor ? 1 : 0
     Behavior on opacity { NumberAnimation { duration: 100 } }
   }
 
-  BorderSurface {
-    id: protoChip
-    anchors.left: parent.left
-    anchors.leftMargin: Style.space(28)
-    anchors.verticalCenter: parent.verticalCenter
-    implicitWidth: protoLabel.implicitWidth + Style.space(8)
-    implicitHeight: protoLabel.implicitHeight + Style.space(4)
-    radius: Style.cornerRadius
-    color: Util.alpha(root.foreground, 0.06)
-    borderSpec: Border.none()
-
-    Text {
-      id: protoLabel
-      anchors.centerIn: parent
-      text: Model.protocolLabel(root.connection && root.connection.protocol)
-      color: root.dim
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
-      font.bold: true
-    }
-  }
-
   Rectangle {
     id: stateDot
-    anchors.left: protoChip.right
-    anchors.leftMargin: Style.space(8)
+    anchors.left: parent.left
+    anchors.leftMargin: Style.space(28)
     anchors.verticalCenter: parent.verticalCenter
     width: Style.space(6)
     height: Style.space(6)
     radius: width / 2
-    color: root.stateColor
+    color: root.toneColor
   }
 
-  Text {
-    id: stateText
+  Column {
+    id: headlines
     anchors.left: stateDot.right
-    anchors.leftMargin: Style.space(6)
-    anchors.verticalCenter: parent.verticalCenter
-    text: Model.stateLabel(root.stateName)
-    color: root.stateColor
-    font.family: root.fontFamily
-    font.pixelSize: Style.font.caption
-    font.bold: true
-  }
-
-  Text {
-    id: endpoint
-    anchors.left: stateText.right
-    anchors.leftMargin: Style.space(10)
-    anchors.right: classMark.left
-    anchors.rightMargin: Style.space(8)
-    anchors.verticalCenter: parent.verticalCenter
-    text: {
-      var conn = root.connection || {}
-      var line = Model.formatEndpoint(conn.localAddress, conn.localPort)
-        + "  →  "
-        + Model.formatEndpoint(conn.remoteAddress, conn.remotePort)
-      if (conn.service) line += "  " + conn.service
-      if (conn.interface) line += "  " + conn.interface
-      return line
-    }
-    color: root.foreground
-    font.family: root.fontFamily
-    font.pixelSize: Style.font.caption
-    elide: Text.ElideMiddle
-  }
-
-  Text {
-    id: classMark
     anchors.right: parent.right
+    anchors.leftMargin: Style.space(10)
     anchors.rightMargin: Style.space(10)
     anchors.verticalCenter: parent.verticalCenter
-    text: Model.classLabel(root.connection && root.connection.class)
-    color: root.dim
-    font.family: root.fontFamily
-    font.pixelSize: Style.font.caption
-    font.bold: true
+    spacing: Style.space(2)
+
+    Text {
+      width: parent.width
+      text: Model.connectionHeadline(root.connection)
+      color: root.vivid ? root.toneColor : root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.body
+      elide: Text.ElideRight
+    }
+
+    Text {
+      visible: Model.connectionDetail(root.connection) !== ""
+      width: parent.width
+      text: Model.connectionDetail(root.connection)
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      elide: Text.ElideRight
+    }
   }
 }

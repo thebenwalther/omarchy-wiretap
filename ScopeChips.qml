@@ -11,9 +11,9 @@ ButtonGroup {
   fontSize: Style.font.caption
   options: [
     { value: "all", label: "All" },
-    { value: "established", label: "Estab" },
-    { value: "listening", label: "Listen" },
-    { value: "internet", label: "Net" },
-    { value: "local", label: "Local" }
+    { value: "established", label: "Talking" },
+    { value: "listening", label: "Waiting" },
+    { value: "internet", label: "Internet" },
+    { value: "local", label: "This computer" }
   ]
 }

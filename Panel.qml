@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -27,36 +28,32 @@ Panel {
   property bool hideSystem: true
   property string query: ""
   property int cursor: 0
-  property int phraseIndex: 0
-  property double nowMs: Date.now()
   property string copyNotice: ""
 
-  readonly property var phrases: [
-    "Watching sockets",
-    "Counting listeners",
-    "Tracing owners",
-    "Sorting wires",
-    "Holding the line"
-  ]
   readonly property color foreground: Color.popups.text
   readonly property color dim: Qt.darker(foreground, 1.5)
   readonly property color accent: Color.accent
   readonly property color urgent: Color.urgent
+  readonly property string mood: Model.snapshotTone(root.snapshot)
+  readonly property color moodColor: {
+    if (root.mood === "talking" || root.mood === "waiting") return root.accent
+    if (root.mood === "open" || root.mood === "connecting") return root.urgent
+    return root.dim
+  }
   readonly property string fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
   readonly property var rows: Model.visibleRows(root.snapshot, root.query, root.scope, root.expandedKeys, root.appearedIds, root.newProcessKeys)
   readonly property int rowCount: root.rows.length
   readonly property string detailText: {
-    if (root.backendError && Model.socketCount(root.snapshot) === 0) return "ERROR"
-    if (root.usingLastGood) return "STALE"
-    return Model.relativeAge(root.snapshot.generatedAt, root.nowMs) || "…"
+    if (root.backendError && Model.socketCount(root.snapshot) === 0) return "Can't see"
+    if (root.usingLastGood) return "Couldn't refresh"
+    return ""
   }
   readonly property string statusCaption: {
-    if (root.backendError && Model.socketCount(root.snapshot) === 0)
-      return root.backendErrorText || "iproute2 ss is not on PATH"
-    if (root.usingLastGood) return "Showing last snapshot"
     if (root.copyNotice !== "") return root.copyNotice
-    var ms = Model.formatElapsedMs(root.snapshot.elapsedMs)
-    return ms !== "" ? "ss · " + ms : "ss"
+    if (root.backendError && Model.socketCount(root.snapshot) === 0)
+      return Model.missingToolMessage(root.backendErrorText)
+    if (root.usingLastGood) return "Couldn't refresh — showing the last list"
+    return ""
   }
 
   function processIcon(proc) {
@@ -226,21 +223,6 @@ Panel {
   onRowsChanged: root.clampCursor()
 
   Timer {
-    interval: 1000
-    repeat: true
-    running: root.opened
-    triggeredOnStart: true
-    onTriggered: root.nowMs = Date.now()
-  }
-
-  Timer {
-    interval: 8000
-    repeat: true
-    running: root.opened
-    onTriggered: root.phraseIndex = (root.phraseIndex + 1) % root.phrases.length
-  }
-
-  Timer {
     id: noticeTimer
     interval: 1600
     onTriggered: root.copyNotice = ""
@@ -270,15 +252,7 @@ Panel {
       onActivateRequested: root.activateCursor()
       onTextKey: function(text) { root.handleTextKey(text) }
 
-      Flickable {
-        id: scroller
-        anchors.fill: parent
-        contentWidth: width
-        contentHeight: contentColumn.implicitHeight
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
-
-        Column {
+      Column {
           id: contentColumn
           width: parent.width
           spacing: Style.spacing.panelGap
@@ -287,8 +261,17 @@ Panel {
             width: parent.width
             implicitHeight: hero.implicitHeight + Style.space(24)
             radius: Style.cornerRadius
-            color: Util.alpha(root.accent, 0.08)
-            borderSpec: Border.flat(Util.alpha(root.accent, 0.42), Math.max(1, Style.normalBorderWidth))
+            color: Util.alpha(root.moodColor, 0.12)
+            borderSpec: Border.flat(Util.alpha(root.moodColor, 0.55), Math.max(1, Style.normalBorderWidth))
+
+            Rectangle {
+              anchors.left: parent.left
+              anchors.top: parent.top
+              anchors.bottom: parent.bottom
+              width: Math.max(2, Style.space(3))
+              radius: width / 2
+              color: root.moodColor
+            }
 
             PanelHero {
               id: hero
@@ -297,13 +280,14 @@ Panel {
               foreground: root.foreground
               fontFamily: root.fontFamily
               title: "Wiretap"
-              meta: Model.heroMeta(root.snapshot) + " · " + root.phrases[root.phraseIndex % root.phrases.length]
+              meta: Model.heroMeta(root.snapshot)
               detail: root.detailText
               iconComponent: Component {
                 WiretapIcon {
                   iconSize: Style.space(28)
-                  color: root.accent
-                  accent: root.accent
+                  color: root.moodColor
+                  accent: root.moodColor
+                  pulse: root.mood === "talking" || root.mood === "open"
                 }
               }
             }
@@ -313,8 +297,8 @@ Panel {
             id: filterField
             width: parent.width
             foreground: root.foreground
-            accent: root.accent
-            placeholderText: "Filter name, pid, port, listen…"
+            accent: root.moodColor
+            placeholderText: "Find an app, site, or port…"
             text: root.query
             onTextChanged: root.query = text
             Keys.onPressed: function(event) {
@@ -336,7 +320,7 @@ Panel {
             value: root.scope
             foreground: root.foreground
             background: Color.popups.background
-            accent: root.accent
+            accent: root.moodColor
             fontFamily: root.fontFamily
             focusable: false
             onChanged: function(value) { root.setScope(value) }
@@ -345,7 +329,7 @@ Panel {
           Text {
             visible: root.backendError && Model.socketCount(root.snapshot) === 0
             width: parent.width
-            text: root.backendErrorText || "iproute2 ss is not on PATH"
+            text: Model.missingToolMessage(root.backendErrorText)
             color: root.urgent
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -355,7 +339,7 @@ Panel {
           Text {
             visible: !root.backendError && root.rowCount === 0 && String(root.query).trim() !== ""
             width: parent.width
-            text: "Nothing matches. Clear the filter to see every socket."
+            text: "Nothing matches. Clear the search to see everyone."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -365,20 +349,32 @@ Panel {
           Text {
             visible: !root.backendError && root.rowCount === 0 && String(root.query).trim() === "" && Model.socketCount(root.snapshot) === 0 && Number(root.snapshot.generatedAt) > 0
             width: parent.width
-            text: "No sockets"
+            text: "Nothing is talking"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
           }
 
-          Repeater {
+          ListView {
+            id: rowList
+            width: parent.width
+            height: Math.min(contentHeight, Style.space(280))
+            spacing: Style.space(4)
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
             model: root.rows
+            currentIndex: root.cursor
+            onCurrentIndexChanged: if (currentIndex >= 0) Qt.callLater(keepCurrentVisible)
+            function keepCurrentVisible() {
+              if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+            }
 
             delegate: Item {
               id: rowItem
               required property var modelData
               required property int index
-              width: contentColumn.width
+              width: ListView.view.width
               implicitHeight: rowItem.modelData && rowItem.modelData.kind === "connection"
                 ? connRow.implicitHeight
                 : procRow.implicitHeight
@@ -397,6 +393,7 @@ Panel {
                 hasCursor: rowItem.index === root.cursor
                 foreground: root.foreground
                 accent: root.accent
+                urgent: root.urgent
                 dim: root.dim
                 fontFamily: root.fontFamily
                 iconSource: root.processIcon(rowItem.modelData ? rowItem.modelData.process : null)
@@ -416,6 +413,7 @@ Panel {
                 hasCursor: rowItem.index === root.cursor
                 foreground: root.foreground
                 accent: root.accent
+                urgent: root.urgent
                 dim: root.dim
                 fontFamily: root.fontFamily
                 onHovered: root.cursor = rowItem.index
@@ -432,7 +430,7 @@ Panel {
             spacing: Style.space(8)
 
             Button {
-              text: "Expand all"
+              text: "Show all"
               foreground: root.foreground
               accent: root.accent
               fontSize: Style.font.caption
@@ -440,7 +438,7 @@ Panel {
             }
 
             Button {
-              text: "Collapse"
+              text: "Hide details"
               foreground: root.foreground
               accent: root.accent
               fontSize: Style.font.caption
@@ -448,7 +446,7 @@ Panel {
             }
 
             Button {
-              text: "Copy JSON"
+              text: "Copy list"
               foreground: root.foreground
               accent: root.accent
               fontSize: Style.font.caption
@@ -457,13 +455,14 @@ Panel {
           }
 
           Text {
+            visible: root.statusCaption !== ""
             width: parent.width
             text: root.statusCaption
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
           }
-        }
       }
     }
   }

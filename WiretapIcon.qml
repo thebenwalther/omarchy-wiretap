@@ -23,7 +23,6 @@ Item {
     ColorAnimation { duration: 180 }
   }
 
-  // Quiet cable: two parallel wires and a needle that touches the top one.
   Shape {
     anchors.fill: parent
     antialiasing: true
@@ -49,7 +48,7 @@ Item {
     }
 
     ShapePath {
-      strokeColor: root.color
+      strokeColor: root.contactColor
       strokeWidth: root.stroke
       capStyle: ShapePath.RoundCap
       fillColor: "transparent"

@@ -176,11 +176,11 @@ TestCase {
   }
 
   function test_formatters() {
-    compare(Model.formatBytes(7939), "7.9K")
-    compare(Model.formatBytes(22131), "22K")
+    compare(Model.formatBytes(7939), "8 KB")
+    compare(Model.formatBytes(22131), "22 KB")
     compare(Model.formatEndpoint("10.10.5.90", 443), "10.10.5.90:443")
     compare(Model.formatEndpoint("2001:db8::1", 443), "[2001:db8::1]:443")
-    compare(Model.classLabel("tailscale"), "ts")
+    compare(Model.placeLabel("tailscale"), "over Tailscale")
     compare(Model.nextScope("all"), "established")
     compare(Model.nextScope("local"), "all")
     compare(Model.scopeAt(3), "listening")
@@ -191,6 +191,55 @@ TestCase {
       remoteAddress: "1.1.1.1",
       remotePort: 443
     }), "tcp 10.10.5.90:443 → 1.1.1.1:443")
+  }
+
+  function test_humanLanguage() {
+    compare(Model.stateLabel("estab"), "Talking")
+    compare(Model.stateLabel("listen"), "Waiting")
+    compare(Model.stateLabel("time-wait"), "Finishing")
+    compare(Model.stateLabel("syn-sent"), "Connecting")
+    compare(Model.connectionHeadline({
+      state: "estab",
+      service: "https",
+      remoteAddress: "140.82.113.25",
+      remotePort: 443
+    }), "https → 140.82.113.25")
+    compare(Model.connectionHeadline({
+      state: "listen",
+      localPort: 22,
+      service: "ssh",
+      class: "unspecified",
+      internetFacing: true
+    }), "Open to the world on port 22 (ssh)")
+    compare(Model.connectionHeadline({
+      state: "listen",
+      localPort: 631,
+      service: "ipp",
+      class: "loopback",
+      internetFacing: false
+    }), "Waiting on port 631 (ipp)")
+    compare(Model.processTitle({ displayName: "lingering" }), "Closed connections")
+    compare(Model.processTitle({ displayName: "unknown" }), "Unknown app")
+    compare(Model.processCountLabel(1), "1 connection")
+    compare(Model.processCountLabel(12), "12 connections")
+    compare(Model.trafficLabel({ bytesSent: 22131, bytesReceived: 7939 }), "22 KB sent · 8 KB received")
+    compare(Model.heroMeta(sampleSnapshot()), "2 apps talking · 1 waiting for a connection")
+    compare(Model.missingToolMessage("iproute2 ss is not on PATH"), "Can't see connections (ss missing)")
+    compare(Model.connectionTone({
+      state: "estab", class: "internet", internetFacing: true
+    }), "talking")
+    compare(Model.connectionTone({
+      state: "estab", class: "private", internetFacing: false
+    }), "local")
+    compare(Model.connectionTone({
+      state: "listen", class: "unspecified", internetFacing: true
+    }), "open")
+    compare(Model.connectionTone({
+      state: "listen", class: "loopback", internetFacing: false
+    }), "waiting")
+    compare(Model.connectionTone({ state: "syn-sent" }), "connecting")
+    compare(Model.connectionTone({ state: "time-wait" }), "finishing")
+    compare(Model.snapshotTone(sampleSnapshot()), "talking")
   }
 
   function test_expandHelpers() {

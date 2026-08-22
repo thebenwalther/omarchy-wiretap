@@ -231,13 +231,10 @@ function diff(prev, next) {
 function formatBytes(value) {
   var n = Number(value)
   if (!isFinite(n) || n < 0) return ""
-  if (n < 1000) return String(Math.round(n))
-  if (n < 1000000) {
-    var kilo = n / 1000
-    return (kilo >= 10 ? String(Math.round(kilo)) : kilo.toFixed(1).replace(/\.0$/, "")) + "K"
-  }
+  if (n < 1000) return Math.round(n) + " B"
+  if (n < 1000000) return Math.round(n / 1000) + " KB"
   var mega = n / 1000000
-  return (mega >= 10 ? String(Math.round(mega)) : mega.toFixed(1).replace(/\.0$/, "")) + "M"
+  return (mega >= 10 ? String(Math.round(mega)) : mega.toFixed(1).replace(/\.0$/, "")) + " MB"
 }
 
 function formatPort(port) {
@@ -267,25 +264,137 @@ function processCopyText(proc) {
   return pid > 0 ? name + " pid " + pid : name
 }
 
-function classLabel(klass) {
-  if (klass === "internet") return "net"
-  if (klass === "private") return "lan"
-  if (klass === "tailscale") return "ts"
-  if (klass === "loopback") return "lo"
-  if (klass === "docker") return "dk"
-  if (klass === "multicast") return "mc"
-  if (klass === "linklocal") return "ll"
-  if (klass === "unspecified") return "*"
+function placeLabel(klass) {
+  if (klass === "internet") return "on the internet"
+  if (klass === "private") return "on this network"
+  if (klass === "tailscale") return "over Tailscale"
+  if (klass === "loopback") return "on this computer"
+  if (klass === "docker") return "in Docker"
+  if (klass === "multicast") return "to nearby devices"
+  if (klass === "linklocal") return "on this link"
   return ""
 }
 
+function classLabel(klass) {
+  return placeLabel(klass)
+}
+
 function stateLabel(state) {
-  var value = String(state || "").toUpperCase()
-  return value || "?"
+  var value = String(state || "")
+  if (value === "estab") return "Talking"
+  if (value === "listen") return "Waiting"
+  if (value === "syn-sent" || value === "syn-recv") return "Connecting"
+  if (value === "unconn") return "Idle"
+  if (value === "time-wait" || value === "fin-wait-1" || value === "fin-wait-2"
+    || value === "close-wait" || value === "last-ack" || value === "closing" || value === "close")
+    return "Finishing"
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : ""
 }
 
 function protocolLabel(protocol) {
-  return String(protocol || "").toUpperCase()
+  var value = String(protocol || "")
+  if (value === "udp") return "UDP"
+  if (value === "unix") return "local"
+  return ""
+}
+
+function connectionTone(conn) {
+  if (!conn) return "idle"
+  var state = String(conn.state || "")
+  if (state === "listen") return listenIsPublic(conn) ? "open" : "waiting"
+  if (state === "estab")
+    return (conn.class === "internet" || conn.internetFacing === true) ? "talking" : "local"
+  if (state === "syn-sent" || state === "syn-recv") return "connecting"
+  if (state === "time-wait" || state === "fin-wait-1" || state === "fin-wait-2"
+    || state === "close-wait" || state === "last-ack" || state === "closing" || state === "close")
+    return "finishing"
+  return "idle"
+}
+
+function processTone(proc) {
+  var connections = proc && proc.connections ? proc.connections : []
+  var talking = false
+  var open = false
+  var connecting = false
+  for (var i = 0; i < connections.length; i++) {
+    var tone = connectionTone(connections[i])
+    if (tone === "talking") talking = true
+    else if (tone === "open") open = true
+    else if (tone === "connecting") connecting = true
+  }
+  if (talking) return "talking"
+  if (open) return "open"
+  if (connecting) return "connecting"
+  return "local"
+}
+
+function snapshotTone(snapshot) {
+  if (internetEstab(snapshot) > 0) return "talking"
+  var processes = snapshot && snapshot.processes ? snapshot.processes : []
+  for (var i = 0; i < processes.length; i++) {
+    var connections = processes[i].connections || []
+    for (var j = 0; j < connections.length; j++) {
+      if (connectionTone(connections[j]) === "open") return "open"
+    }
+  }
+  if (talkingAppCount(snapshot) > 0) return "local"
+  if (listenCount(snapshot) > 0) return "waiting"
+  return "idle"
+}
+
+function listenIsPublic(conn) {
+  if (!conn || conn.state !== "listen") return false
+  if (conn.internetFacing === true) return true
+  var klass = String(conn.class || "")
+  return klass !== "loopback" && klass !== ""
+}
+
+function destinationText(conn) {
+  if (!conn) return ""
+  if (conn.state === "listen") return "port " + formatPort(conn.localPort)
+  return formatHost(conn.remoteAddress)
+}
+
+function formatHost(addr) {
+  var host = String(addr || "")
+  if (host === "" || host === "*" || host === "0.0.0.0" || host === "::") return ""
+  if (host.indexOf(":") >= 0 && host.charAt(0) !== "[") return "[" + host + "]"
+  return host
+}
+
+function connectionHeadline(conn) {
+  if (!conn) return ""
+  var service = String(conn.service || "")
+  var state = String(conn.state || "")
+  if (state === "listen") {
+    var port = formatPort(conn.localPort)
+    var label = listenIsPublic(conn) ? "Open to the world on port " + port : "Waiting on port " + port
+    if (service) label += " (" + service + ")"
+    return label
+  }
+  var dest = formatHost(conn.remoteAddress)
+  if (state === "syn-sent" || state === "syn-recv")
+    return dest ? "Connecting to " + dest : "Connecting"
+  if (state === "time-wait" || state === "fin-wait-1" || state === "fin-wait-2"
+    || state === "close-wait" || state === "last-ack" || state === "closing")
+    return dest ? "Finishing with " + dest : "Finishing"
+  if (service && dest) return service + " → " + dest
+  if (dest) return "Talking to " + dest
+  return stateLabel(state)
+}
+
+function connectionDetail(conn) {
+  if (!conn) return ""
+  var bits = []
+  var proto = protocolLabel(conn.protocol)
+  if (proto) bits.push(proto)
+  var place = placeLabel(conn.class)
+  if (place) bits.push(place)
+  var sent = formatBytes(conn.bytesSent)
+  var recv = formatBytes(conn.bytesReceived)
+  if (sent) bits.push(sent + " sent")
+  if (recv) bits.push(recv + " received")
+  return bits.join(" · ")
 }
 
 function plural(count, word) {
@@ -293,19 +402,64 @@ function plural(count, word) {
   return value + " " + word + (value === 1 ? "" : "s")
 }
 
+function talkingAppCount(snapshot) {
+  var processes = snapshot && snapshot.processes ? snapshot.processes : []
+  var n = 0
+  for (var i = 0; i < processes.length; i++) {
+    var connections = processes[i].connections || []
+    for (var j = 0; j < connections.length; j++) {
+      if (connections[j].state === "estab") { n++; break }
+    }
+  }
+  return n
+}
+
 function tooltip(snapshot) {
-  if (!snapshot) return "Wiretap"
-  var t = totalsOf(snapshot)
-  return (Number(t.established) || 0) + " established · "
-    + (Number(t.listen) || 0) + " listening · "
-    + (Number(t.processes) || 0) + " processes"
+  if (!snapshot) return "Who is talking"
+  return heroMeta(snapshot) || "Who is talking"
 }
 
 function heroMeta(snapshot) {
-  var t = totalsOf(snapshot)
-  return plural(t.established, "established") + " · "
-    + plural(t.listen, "listening") + " · "
-    + plural(t.processes, "process")
+  var talking = talkingAppCount(snapshot)
+  var waiting = listenCount(snapshot)
+  var talkingBit = talking === 1 ? "1 app talking" : talking + " apps talking"
+  var waitingBit = waiting === 1 ? "1 waiting for a connection" : waiting + " waiting for connections"
+  if (talking > 0 && waiting > 0) return talkingBit + " · " + waitingBit
+  if (talking > 0) return talkingBit
+  if (waiting > 0) return waitingBit
+  if (socketCount(snapshot) > 0) return "Nothing is talking right now"
+  return "Who is talking"
+}
+
+function processTitle(proc) {
+  var name = String(proc && proc.displayName || "")
+  if (name === "lingering" || name === "Closed connections") return "Closed connections"
+  if (name === "" || name === "unknown") return "Unknown app"
+  return name
+}
+
+function processCountLabel(count) {
+  return plural(Number(count) || 0, "connection")
+}
+
+function trafficLabel(proc) {
+  if (!proc) return ""
+  var up = formatBytes(proc.bytesSent)
+  var down = formatBytes(proc.bytesReceived)
+  var bits = []
+  if (up) bits.push(up + " sent")
+  if (down) bits.push(down + " received")
+  return bits.join(" · ")
+}
+
+function missingToolMessage(raw) {
+  var text = String(raw || "")
+  if (text.indexOf("ss") >= 0 || text === "") return "Can't see connections (ss missing)"
+  return "Can't see connections"
+}
+
+function healthyStatus() {
+  return ""
 }
 
 function relativeAge(generatedAt, nowMs) {
@@ -339,11 +493,7 @@ function formatElapsedMs(ms) {
 }
 
 function bytePair(proc) {
-  if (!proc) return ""
-  var up = formatBytes(proc.bytesSent)
-  var down = formatBytes(proc.bytesReceived)
-  if (!up && !down) return ""
-  return "↑" + (up || "0") + " ↓" + (down || "0")
+  return trafficLabel(proc)
 }
 
 function snapshotJson(snapshot) {

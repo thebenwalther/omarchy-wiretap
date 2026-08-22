@@ -709,7 +709,7 @@ def build_snapshot(
         if proc["displayName"] in ("", "unknown") and not proc.get("pid"):
             states = {c.get("state") for c in proc["connections"]}
             if states and states <= {"time-wait", "close", "last-ack", "closing"}:
-                proc["displayName"] = "lingering"
+                proc["displayName"] = "Closed connections"
 
     def process_sort_key(proc: dict) -> tuple:
         internet_estab = sum(

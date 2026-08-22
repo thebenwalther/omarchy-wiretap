@@ -15,13 +15,22 @@ CursorSurface {
   property string iconSource: ""
   property string fontFamily: Style.font.family
   property color dim: Qt.darker(foreground, 1.5)
+  property color urgent: Color.urgent
 
   signal activated()
   signal hovered()
 
-  implicitHeight: Math.max(iconBox.implicitHeight, labels.implicitHeight, trail.implicitHeight) + Style.space(12)
-  fill: Util.alpha(accent, root.appeared ? 0.11 : 0.08)
-  currentFill: Util.alpha(accent, 0.11)
+  readonly property string tone: Model.processTone(root.process)
+  readonly property color toneColor: {
+    if (root.tone === "talking") return root.accent
+    if (root.tone === "open" || root.tone === "connecting") return root.urgent
+    if (root.tone === "waiting") return root.accent
+    return root.foreground
+  }
+
+  implicitHeight: Math.max(iconBox.implicitHeight, labels.implicitHeight) + Style.space(12)
+  fill: Util.alpha(root.toneColor, root.appeared ? 0.14 : 0.07)
+  currentFill: Util.alpha(root.toneColor, 0.12)
   bordered: true
 
   Behavior on color { ColorAnimation { duration: 180 } }
@@ -40,8 +49,8 @@ CursorSurface {
     anchors.bottom: parent.bottom
     width: Math.max(2, Style.space(3))
     radius: width / 2
-    color: root.accent
-    opacity: root.hasCursor ? 1 : 0
+    color: root.toneColor
+    opacity: root.hasCursor || root.tone === "talking" || root.tone === "open" ? 1 : 0
     Behavior on opacity { NumberAnimation { duration: 100 } }
   }
 
@@ -53,8 +62,8 @@ CursorSurface {
     implicitWidth: Style.space(28)
     implicitHeight: Style.space(28)
     radius: Style.cornerRadius
-    color: Util.alpha(root.foreground, 0.06)
-    borderSpec: Border.flat(Util.alpha(root.foreground, 0.18), Math.max(1, Style.normalBorderWidth))
+    color: Util.alpha(root.toneColor, 0.12)
+    borderSpec: Border.flat(Util.alpha(root.toneColor, 0.28), Math.max(1, Style.normalBorderWidth))
 
     Image {
       anchors.centerIn: parent
@@ -70,15 +79,15 @@ CursorSurface {
   Column {
     id: labels
     anchors.left: iconBox.right
-    anchors.right: trail.left
+    anchors.right: parent.right
     anchors.verticalCenter: parent.verticalCenter
     anchors.leftMargin: Style.space(10)
-    anchors.rightMargin: Style.space(8)
+    anchors.rightMargin: Style.space(10)
     spacing: Style.space(2)
 
     Text {
       width: parent.width
-      text: String(root.process && root.process.displayName || "unknown")
+      text: Model.processTitle(root.process)
       color: root.foreground
       font.family: root.fontFamily
       font.pixelSize: Style.font.body
@@ -89,54 +98,14 @@ CursorSurface {
     Text {
       width: parent.width
       text: {
-        var proc = root.process || {}
-        var bits = []
-        var pid = Number(proc.pid) || 0
-        if (pid > 0) bits.push("pid " + pid)
-        if (proc.user) bits.push(String(proc.user))
-        if (proc.system) bits.push("system")
-        return bits.join(" · ")
+        var countText = Model.processCountLabel(root.count)
+        var traffic = Model.trafficLabel(root.process)
+        return traffic !== "" ? countText + " · " + traffic : countText
       }
       color: root.dim
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       elide: Text.ElideRight
-    }
-  }
-
-  Column {
-    id: trail
-    anchors.right: parent.right
-    anchors.rightMargin: Style.space(10)
-    anchors.verticalCenter: parent.verticalCenter
-    spacing: Style.space(2)
-
-    BorderSurface {
-      anchors.right: parent.right
-      implicitWidth: countLabel.implicitWidth + Style.space(10)
-      implicitHeight: countLabel.implicitHeight + Style.space(4)
-      radius: Style.cornerRadius
-      color: "transparent"
-      borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
-
-      Text {
-        id: countLabel
-        anchors.centerIn: parent
-        text: String(root.count)
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        font.bold: true
-      }
-    }
-
-    Text {
-      visible: Model.bytePair(root.process) !== ""
-      anchors.right: parent.right
-      text: Model.bytePair(root.process)
-      color: root.dim
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
     }
   }
 }
