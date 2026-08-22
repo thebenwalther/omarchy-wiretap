@@ -149,8 +149,12 @@ BarWidget {
     if (panelLoader.item) panelLoader.item.close()
   }
 
-  function togglePanel() {
+  function toggle() {
     if (panelLoader.item) panelLoader.item.toggle()
+  }
+
+  function togglePanel() {
+    root.toggle()
   }
 
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
@@ -241,7 +245,7 @@ BarWidget {
     function close(): void { root.close() }
     function show(): void { root.open() }
     function hide(): void { root.close() }
-    function toggle(): void { root.togglePanel() }
+    function toggle(): void { root.toggle() }
     function refresh(): string { root.broadcast("refresh"); return "ok" }
     function snapshot(): string { return JSON.stringify(root.snapshot) }
     function debug(): string {
@@ -272,7 +276,7 @@ BarWidget {
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) root.cycleScope()
       else if (buttonCode === Qt.MiddleButton) root.refresh()
-      else root.togglePanel()
+      else root.toggle()
     }
 
     Row {
