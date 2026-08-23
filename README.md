@@ -8,9 +8,13 @@ Network associates you to an AP. Wiretap shows who is on the wire.
 
 ## Watch it work
 
-https://github.com/user-attachments/assets/e7e283ac-c24d-40be-9c66-28fa34105bc6
+[![Watch the Wiretap demo](docs/demo/thumbnail.png)](https://github.com/thebenwalther/omarchy-wiretap/releases/download/v1.1.0/wiretap-demo-loop.mp4)
 
-A 14-second soundtracked loop of the mark, the panel, and the verbs. Rebuild stills and the loop with `docs/demo/record`. A one-minute live take is in [docs/DEMO.md](docs/DEMO.md).
+Watch the [14-second soundtracked loop](https://github.com/thebenwalther/omarchy-wiretap/releases/download/v1.1.0/wiretap-demo-loop.mp4)
+of the mark, the live panel, and the verbs, now set to the finished Omarchy
+promo score shared with OmaLab. Rebuild the stills and video with
+`docs/demo/record`; the one-minute live-take plan is in
+[docs/DEMO.md](docs/DEMO.md).
 
 ## Install
 
