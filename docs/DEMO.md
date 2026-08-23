@@ -3,9 +3,9 @@
 The strongest demo is one beat: an app is talking, a port is open to the world,
 and you can tell which is which without reading `ss`. The complete story fits
 in about a minute. A 14-second soundtracked loop lives in
-`docs/demo/wiretap-demo-loop.mp4`. The README links to the copy attached to the
-v1.1.0 GitHub release. Rebuild the local file with `docs/demo/record`; replace
-the release asset when the published video should change.
+`docs/demo/wiretap-demo-loop.mp4`. The README plays it inline from a GitHub
+user-attachment URL. Rebuild the local file with `docs/demo/record`; upload the
+new MP4 as a user attachment when the published video should change.
 
 ## Logo
 
@@ -25,8 +25,8 @@ docs/demo/record
 
 `render-assets` draws `preview.png`, `docs/demo/thumbnail.png`, and the panel
 still from SVG. `record` pairs the visuals with `docs/demo/promo-score.m4a`,
-the finished Omarchy promo cue shared with OmaLab, and encodes
-`docs/demo/wiretap-demo-loop.mp4` without re-encoding the score.
+Wiretap's re-keyed and rearranged companion to the OmaLab promo cue, and
+encodes `docs/demo/wiretap-demo-loop.mp4` without re-encoding the score.
 
 ## One-minute live take (optional)
 
