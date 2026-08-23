@@ -24,9 +24,9 @@ docs/demo/record
 ```
 
 `render-assets` draws `preview.png`, `docs/demo/thumbnail.png`, and the panel
-still from SVG. `record` renders an original 14-second electronic score with
-`docs/demo/score.py` (signal motif, packet clicks, warm pads, and low pulse —
-no third-party samples) and encodes `docs/demo/wiretap-demo-loop.mp4`.
+still from SVG. `record` pairs the visuals with `docs/demo/promo-score.m4a`,
+the finished Omarchy promo cue shared with OmaLab, and encodes
+`docs/demo/wiretap-demo-loop.mp4` without re-encoding the score.
 
 ## One-minute live take (optional)
 

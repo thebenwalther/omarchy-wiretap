@@ -6,6 +6,7 @@ PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly PROJECT_ROOT
 DEMO="$PROJECT_ROOT/docs/demo"
 OUT="$DEMO/wiretap-demo-loop.mp4"
+SCORE="$DEMO/promo-score.m4a"
 
 command -v ffmpeg >/dev/null 2>&1 || {
   printf 'record: ffmpeg is required\n' >&2
@@ -14,22 +15,18 @@ command -v ffmpeg >/dev/null 2>&1 || {
 
 "$DEMO/render-assets"
 
-command -v python3 >/dev/null 2>&1 || {
-  printf 'record: python3 is required to render the score\n' >&2
+[[ -f "$SCORE" ]] || {
+  printf 'record: missing promo score: %s\n' "$SCORE" >&2
   exit 1
 }
 
-SCORE="$(mktemp --suffix=.wav)"
 VIDEO="$(mktemp --suffix=.mp4)"
-trap 'rm -f -- "$SCORE" "$VIDEO"' EXIT
-
-# Original 14s piece: drums, bass, piano, melody. No third-party sample.
-python3 "$DEMO/score.py" "$SCORE"
+trap 'rm -f -- "$VIDEO"' EXIT
 
 ffmpeg -y \
   -loop 1 -t 3.6 -i "$DEMO/title-card.png" \
   -loop 1 -t 7.2 -i "$PROJECT_ROOT/preview.png" \
-  -loop 1 -t 3.8 -i "$DEMO/end-card.png" \
+  -loop 1 -t 4.133 -i "$DEMO/end-card.png" \
   -filter_complex "\
     [0:v]scale=1920:1080,fps=30,format=yuv420p,settb=AVTB[v0]; \
     [1:v]scale=1920:1080,fps=30,format=yuv420p,settb=AVTB[v1]; \
@@ -40,8 +37,6 @@ ffmpeg -y \
 
 ffmpeg -y -hide_banner -loglevel error \
   -i "$VIDEO" -i "$SCORE" \
-  -c:v copy \
-  -af "loudnorm=I=-15.5:TP=-1.0:LRA=7" \
-  -c:a aac -b:a 192k -ar 48000 -shortest -movflags +faststart "$OUT"
+  -c:v copy -c:a copy -shortest -movflags +faststart "$OUT"
 
 printf 'wrote %s\n' "$OUT"
