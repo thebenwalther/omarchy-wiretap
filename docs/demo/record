@@ -40,6 +40,8 @@ ffmpeg -y \
 
 ffmpeg -y -hide_banner -loglevel error \
   -i "$VIDEO" -i "$SCORE" \
-  -c:v copy -c:a aac -b:a 192k -shortest -movflags +faststart "$OUT"
+  -c:v copy \
+  -af "loudnorm=I=-15.5:TP=-1.0:LRA=7" \
+  -c:a aac -b:a 192k -ar 48000 -shortest -movflags +faststart "$OUT"
 
 printf 'wrote %s\n' "$OUT"

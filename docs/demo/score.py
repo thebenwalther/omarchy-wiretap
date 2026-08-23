@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Original 14s Wiretap promo score. Writes a 48 kHz stereo WAV to argv[1]."""
+"""Original 14s Wiretap promo score. Writes a 48 kHz stereo WAV to argv[1].
+
+The cue is intentionally electronic rather than an imitation of acoustic
+instruments: two glassy "wire" voices, a centered tap, packet-like clicks,
+warm pads, and a restrained low pulse. Its two arrivals line up with the
+title-to-panel and panel-to-end-card transitions in ``record``.
+"""
 
 from __future__ import annotations
 
@@ -10,298 +16,384 @@ import struct
 import sys
 import wave
 
-SR = 48000
+SR = 48_000
 DURATION = 14.2
-BPM = 100.0
-BEAT = 60.0 / BPM
 N = int(DURATION * SR)
+BPM = 96.0
+BEAT = 60.0 / BPM
+TAU = 2.0 * math.pi
 
 
-def midi_hz(n: float) -> float:
-    return 440.0 * (2.0 ** ((n - 69.0) / 12.0))
+def midi_hz(note: float) -> float:
+    return 440.0 * 2.0 ** ((note - 69.0) / 12.0)
 
 
-def equal_pan(pan: float) -> tuple[float, float]:
-    # pan -1 left … +1 right
-    a = (pan + 1.0) * 0.5
-    return math.sqrt(1.0 - a), math.sqrt(a)
+def pan_gains(pan: float) -> tuple[float, float]:
+    position = (max(-1.0, min(1.0, pan)) + 1.0) * math.pi / 4.0
+    return math.cos(position), math.sin(position)
+
+
+def smoothstep(value: float) -> float:
+    value = max(0.0, min(1.0, value))
+    return value * value * (3.0 - 2.0 * value)
 
 
 class Mix:
     def __init__(self) -> None:
-        self.l = array.array("d", [0.0]) * N
-        self.r = array.array("d", [0.0]) * N
+        self.left = array.array("d", [0.0]) * N
+        self.right = array.array("d", [0.0]) * N
+        self.aux_left = array.array("d", [0.0]) * N
+        self.aux_right = array.array("d", [0.0]) * N
 
-    def add(self, i: int, sample: float, left: float, right: float) -> None:
-        if 0 <= i < N:
-            self.l[i] += sample * left
-            self.r[i] += sample * right
+    def add(
+        self,
+        index: int,
+        sample: float,
+        left: float,
+        right: float,
+        send: float = 0.0,
+    ) -> None:
+        if 0 <= index < N:
+            l_sample = sample * left
+            r_sample = sample * right
+            self.left[index] += l_sample
+            self.right[index] += r_sample
+            self.aux_left[index] += l_sample * send
+            self.aux_right[index] += r_sample * send
 
-    def tone(
+    def pad(
         self,
         start: float,
-        dur: float,
-        freq: float,
-        vel: float,
+        duration: float,
+        note: float,
+        velocity: float,
         pan: float,
-        harmonics: tuple[tuple[float, float], ...],
-        attack: float,
-        decay: float,
-        sustain: float,
-        release: float,
     ) -> None:
-        i0 = int(start * SR)
-        n = min(int(dur * SR), N - i0)
-        if n <= 0:
+        """A wide, slowly opening additive pad with no aliased saw waves."""
+        first = int(start * SR)
+        count = min(int(duration * SR), N - first)
+        if count <= 0:
             return
-        left, right = equal_pan(pan)
-        hold = max(0.0, dur - attack - decay - release)
-        two_pi = 2.0 * math.pi
-        for i in range(n):
-            t = i / SR
-            if t < attack:
-                env = t / attack if attack > 0 else 1.0
-            elif t < attack + decay:
-                env = 1.0 + (sustain - 1.0) * ((t - attack) / decay)
-            elif t < attack + decay + hold:
-                env = sustain
-            else:
-                rt = dur - t
-                env = sustain * (rt / release) if release > 0 else 0.0
-            if env <= 0:
-                continue
-            phase = two_pi * freq * t
-            s = 0.0
-            for h, amp in harmonics:
-                s += amp * math.sin(phase * h)
-            self.add(i0 + i, s * env * vel, left, right)
+        frequency = midi_hz(note)
+        left_gain, right_gain = pan_gains(pan)
+        phase_l = 0.0
+        phase_r = 0.7
+        partials = ((1, 1.0), (2, 0.24), (3, 0.12), (5, 0.045))
+        for offset in range(count):
+            time = offset / SR
+            attack = smoothstep(time / 0.42)
+            release = smoothstep((duration - time) / 0.9)
+            envelope = attack * release
+            # Tiny independent drift supplies width without moving the bass.
+            drift = 1.0 + 0.0009 * math.sin(TAU * 0.17 * time + note)
+            phase_l += TAU * frequency * drift / SR
+            phase_r += TAU * frequency * (2.0 - drift) / SR
+            sample_l = 0.0
+            sample_r = 0.0
+            for harmonic, amount in partials:
+                sample_l += math.sin(phase_l * harmonic) * amount
+                sample_r += math.sin(phase_r * harmonic) * amount
+            index = first + offset
+            level = velocity * envelope
+            self.left[index] += sample_l * level * left_gain
+            self.right[index] += sample_r * level * right_gain
+            self.aux_left[index] += sample_l * level * left_gain * 0.26
+            self.aux_right[index] += sample_r * level * right_gain * 0.26
 
-    def kick(self, start: float, vel: float = 1.0) -> None:
-        i0 = int(start * SR)
-        n = min(int(0.28 * SR), N - i0)
+    def glass(
+        self,
+        start: float,
+        note: float,
+        velocity: float,
+        pan: float,
+        duration: float = 0.9,
+    ) -> None:
+        """A short glass/fiber pluck used as the Wiretap melodic identity."""
+        first = int(start * SR)
+        count = min(int(duration * SR), N - first)
+        if count <= 0:
+            return
+        frequency = midi_hz(note)
+        left, right = pan_gains(pan)
+        # Slightly inharmonic modes keep this from sounding like a toy piano.
+        modes = ((1.0, 1.0, 4.6), (2.01, 0.45, 6.8), (3.96, 0.22, 8.5), (7.08, 0.08, 12.0))
+        phases = [0.0, 0.4, 1.1, 2.0]
+        for offset in range(count):
+            time = offset / SR
+            attack = min(1.0, time / 0.004)
+            sample = 0.0
+            for mode, amount, decay in modes:
+                sample += math.sin(TAU * frequency * mode * time + phases[int(mode) % 4]) * amount * math.exp(-time * decay)
+            sample *= attack * velocity
+            self.add(first + offset, sample, left, right, send=0.48)
+
+    def bass(
+        self,
+        start: float,
+        note: float,
+        velocity: float,
+        duration: float = 0.5,
+    ) -> None:
+        first = int(start * SR)
+        count = min(int(duration * SR), N - first)
+        if count <= 0:
+            return
+        frequency = midi_hz(note)
         phase = 0.0
-        click_phase = 0.0
-        for i in range(max(0, n)):
-            t = i / SR
-            f = 46.0 + 130.0 * math.exp(-t * 22.0)
-            phase += 2.0 * math.pi * f / SR
-            body = math.sin(phase) * math.exp(-t * 9.5)
-            click_phase += 2.0 * math.pi * 1800.0 / SR
-            click = math.sin(click_phase) * math.exp(-t * 70.0) * 0.22
-            self.add(i0 + i, (body + click) * vel * 1.35, 0.72, 0.72)
+        for offset in range(count):
+            time = offset / SR
+            glide = 1.0 + 0.012 * math.exp(-time * 18.0)
+            phase += TAU * frequency * glide / SR
+            envelope = min(1.0, time / 0.012) * math.exp(-time * 2.25)
+            body = math.sin(phase) + 0.18 * math.sin(phase * 2.0)
+            sample = math.tanh(body * 1.25) * envelope * velocity
+            self.add(first + offset, sample, 0.71, 0.71)
 
-    def clap(self, start: float, vel: float = 0.7, rng: random.Random | None = None) -> None:
-        rng = rng or random.Random(7)
-        bursts = (0.0, 0.012, 0.024, 0.041)
-        left, right = equal_pan(0.12)
-        lp_a = 1.0 - math.exp(-2.0 * math.pi * 4200.0 / SR)
-        hp_a = 1.0 - math.exp(-2.0 * math.pi * 900.0 / SR)
-        for delay in bursts:
-            i0 = int((start + delay) * SR)
-            n = min(int(0.12 * SR), N - i0)
-            hp = 0.0
-            lp = 0.0
-            for i in range(max(0, n)):
-                t = i / SR
-                white = rng.uniform(-1.0, 1.0)
-                hp += hp_a * (white - hp)
-                band = white - hp
-                lp += lp_a * (band - lp)
-                env = math.exp(-t * 38.0)
-                self.add(i0 + i, lp * env * vel * 0.7, left, right)
+    def kick(self, start: float, velocity: float = 1.0) -> None:
+        first = int(start * SR)
+        count = min(int(0.34 * SR), N - first)
+        phase = 0.0
+        for offset in range(max(0, count)):
+            time = offset / SR
+            frequency = 44.0 + 105.0 * math.exp(-time * 26.0)
+            phase += TAU * frequency / SR
+            body = math.sin(phase) * math.exp(-time * 10.5)
+            knock = math.sin(TAU * 930.0 * time) * math.exp(-time * 72.0) * 0.10
+            self.add(first + offset, (body + knock) * velocity, 0.71, 0.71)
 
-    def hat(self, start: float, vel: float, open_hat: bool, rng: random.Random) -> None:
-        dur = 0.16 if open_hat else 0.038
-        i0 = int(start * SR)
-        n = min(int(dur * SR), N - i0)
-        left, right = equal_pan(0.35 if open_hat else -0.25)
-        hp_a = 1.0 - math.exp(-2.0 * math.pi * 6000.0 / SR)
-        lp_a = 1.0 - math.exp(-2.0 * math.pi * 11000.0 / SR)
-        hp = 0.0
-        lp = 0.0
-        for i in range(max(0, n)):
-            t = i / SR
-            white = rng.uniform(-1.0, 1.0)
-            hp += hp_a * (white - hp)
-            high = white - hp
-            lp += lp_a * (high - lp)
-            env = math.exp(-t * (22.0 if open_hat else 85.0))
-            self.add(i0 + i, lp * env * vel * 0.7, left, right)
+    def packet(
+        self,
+        start: float,
+        velocity: float,
+        pan: float,
+        rng: random.Random,
+        open_tick: bool = False,
+    ) -> None:
+        duration = 0.12 if open_tick else 0.032
+        first = int(start * SR)
+        count = min(int(duration * SR), N - first)
+        left, right = pan_gains(pan)
+        lowpass = 0.0
+        highpass = 0.0
+        hp_amount = 1.0 - math.exp(-TAU * (5_400.0 if open_tick else 7_200.0) / SR)
+        lp_amount = 1.0 - math.exp(-TAU * 13_500.0 / SR)
+        decay = 28.0 if open_tick else 105.0
+        for offset in range(max(0, count)):
+            time = offset / SR
+            noise = rng.uniform(-1.0, 1.0)
+            highpass += hp_amount * (noise - highpass)
+            high = noise - highpass
+            lowpass += lp_amount * (high - lowpass)
+            sample = lowpass * math.exp(-time * decay) * velocity
+            self.add(first + offset, sample, left, right, send=0.12)
+
+    def tap(self, start: float, velocity: float, rng: random.Random) -> None:
+        """A centered, soft transient—the vertical tap between two wires."""
+        first = int(start * SR)
+        count = min(int(0.14 * SR), N - first)
+        lowpass = 0.0
+        for offset in range(max(0, count)):
+            time = offset / SR
+            noise = rng.uniform(-1.0, 1.0)
+            amount = 1.0 - math.exp(-TAU * 2_600.0 / SR)
+            lowpass += amount * (noise - lowpass)
+            tone = math.sin(TAU * 310.0 * time) * 0.18
+            sample = (lowpass * 0.42 + tone) * math.exp(-time * 31.0) * velocity
+            self.add(first + offset, sample, 0.71, 0.71, send=0.18)
+
+    def sweep(self, start: float, duration: float, velocity: float, rng: random.Random) -> None:
+        """A band-limited lift into a visual transition."""
+        first = int(start * SR)
+        count = min(int(duration * SR), N - first)
+        low = 0.0
+        high = 0.0
+        for offset in range(max(0, count)):
+            time = offset / SR
+            progress = time / duration
+            noise = rng.uniform(-1.0, 1.0)
+            cutoff = 700.0 + 7_500.0 * progress * progress
+            low_amount = 1.0 - math.exp(-TAU * cutoff / SR)
+            high_amount = 1.0 - math.exp(-TAU * max(160.0, cutoff * 0.18) / SR)
+            low += low_amount * (noise - low)
+            high += high_amount * (low - high)
+            band = low - high
+            envelope = smoothstep(progress) * smoothstep((duration - time) / 0.09)
+            pan = -0.58 + 1.16 * progress
+            left, right = pan_gains(pan)
+            self.add(first + offset, band * envelope * velocity, left, right, send=0.28)
+
+    def sub_drop(self, start: float, velocity: float) -> None:
+        first = int(start * SR)
+        count = min(int(1.15 * SR), N - first)
+        phase = 0.0
+        for offset in range(max(0, count)):
+            time = offset / SR
+            frequency = 59.0 - 16.0 * smoothstep(time / 1.15)
+            phase += TAU * frequency / SR
+            envelope = min(1.0, time / 0.012) * math.exp(-time * 3.0)
+            self.add(first + offset, math.sin(phase) * envelope * velocity, 0.71, 0.71)
+
+    def add_room(self) -> None:
+        """Sparse stereo reflections: depth without washing out the transients."""
+        taps = (
+            (0.071, 0.24, False),
+            (0.113, 0.18, True),
+            (0.181, 0.14, False),
+            (0.293, 0.105, True),
+            (0.419, 0.075, False),
+            (0.631, 0.045, True),
+        )
+        for delay, gain, crossed in taps:
+            shift = int(delay * SR)
+            for index in range(shift, N):
+                source = index - shift
+                if crossed:
+                    self.left[index] += self.aux_right[source] * gain
+                    self.right[index] += self.aux_left[source] * gain
+                else:
+                    self.left[index] += self.aux_left[source] * gain
+                    self.right[index] += self.aux_right[source] * gain
 
 
-PIANO = ((1.0, 1.0), (2.0, 0.28), (3.0, 0.10), (4.0, 0.04))
-BASS = ((1.0, 1.0), (2.0, 0.42), (3.0, 0.08))
-LEAD = ((1.0, 1.0), (2.0, 0.22), (3.0, 0.08), (5.0, 0.03))
-
-
-def write_wav(path: str, mix: Mix) -> None:
-    peak = 1e-9
-    for i in range(N):
-        peak = max(peak, abs(mix.l[i]), abs(mix.r[i]))
-    gain = 0.78 / peak
-    fade_in = int(0.06 * SR)
-    fade_out_start = int(12.1 * SR)
-    fade_out_len = N - fade_out_start
-    with wave.open(path, "w") as wf:
-        wf.setnchannels(2)
-        wf.setsampwidth(2)
-        wf.setframerate(SR)
-        frames = bytearray()
-        for i in range(N):
-            env = 1.0
-            if i < fade_in:
-                env = i / fade_in
-            elif i >= fade_out_start:
-                env = max(0.0, 1.0 - (i - fade_out_start) / fade_out_len)
-            l = math.tanh(mix.l[i] * gain * env)
-            r = math.tanh(mix.r[i] * gain * env)
-            frames += struct.pack("<hh", int(l * 32000), int(r * 32000))
-        wf.writeframes(frames)
+CHORDS = (
+    (47, 54, 59, 61, 62),  # Bm(add9)
+    (43, 50, 54, 59, 62),  # Gmaj7
+    (50, 57, 61, 64, 66),  # Dmaj9
+    (45, 52, 59, 61, 64),  # A(add9)
+    (47, 54, 57, 61, 62),  # Bm9
+    (47, 54, 59, 61, 66),  # Bm(add9), open resolve
+)
+ROOTS = (35, 31, 38, 33, 35, 35)
 
 
 def compose(path: str) -> None:
     mix = Mix()
-    rng = random.Random(11)
+    rng = random.Random(0x57495245)
 
-    # Six bars at 100 BPM = 14.4s; last chord rings through the fade.
-    # Am | F | C | G | Am | Am
-    bass_roots = (45, 41, 36, 43, 45, 45)  # A2 F2 C2 G2 A2 A2
-    voicings = (
-        (57, 60, 64),  # A3 C4 E4
-        (53, 57, 60),  # F3 A3 C4
-        (55, 60, 64),  # G3 C4 E4
-        (55, 59, 62),  # G3 B3 D4
-        (57, 60, 64),
-        (57, 64, 69),  # A3 E4 A4
+    # The harmony breathes in 2.5-second bars. The first is deliberately bare;
+    # the rhythm arrives with the panel and leaves again for the end card.
+    for bar, chord in enumerate(CHORDS):
+        start = bar * 4.0 * BEAT
+        duration = 3.15 if bar < 5 else 1.7
+        base_level = 0.035 if bar == 0 else (0.043 if bar < 4 else 0.052)
+        for voice, note in enumerate(chord):
+            if bar == 0 and voice < 2:
+                continue
+            pan = (-0.46, 0.34, -0.18, 0.48, 0.08)[voice]
+            mix.pad(start, duration, note, base_level * (0.86 if voice == 0 else 1.0), pan)
+
+    # The opening mark: two bright wires answering each other, then a center tap.
+    for start, note, pan, level in (
+        (0.28, 71, -0.52, 0.115),
+        (0.61, 78, 0.52, 0.09),
+        (1.22, 73, -0.42, 0.072),
+        (1.55, 78, 0.42, 0.058),
+        (2.18, 74, -0.32, 0.052),
+        (2.49, 78, 0.32, 0.045),
+    ):
+        mix.glass(start, note, level, pan, duration=1.05)
+    mix.tap(0.93, 0.22, rng)
+    mix.tap(1.87, 0.15, rng)
+
+    # Lift and land exactly on the title -> live panel transition.
+    mix.sweep(2.62, 0.63, 0.16, rng)
+    mix.sub_drop(3.25, 0.32)
+    mix.kick(3.25, 0.72)
+    mix.glass(3.25, 78, 0.12, -0.48)
+    mix.glass(3.41, 83, 0.09, 0.48)
+
+    # A quiet, syncopated packet stream under the live panel. It moves across
+    # the stereo field while the centered tap and low pulse hold the UI steady.
+    rhythmic_start = 3.25
+    step = BEAT / 2.0
+    arp_patterns = (
+        (59, 61, 66, 62, 71, 66, 61, 62),
+        (59, 62, 66, 69, 73, 69, 66, 62),
+        (57, 61, 64, 69, 71, 69, 64, 61),
     )
+    for index in range(22):
+        start = rhythmic_start + index * step
+        pattern = arp_patterns[min(2, index // 8)]
+        note = pattern[index % 8]
+        pan = -0.62 if index % 2 == 0 else 0.62
+        level = 0.046 if index % 4 else 0.061
+        mix.glass(start, note, level, pan, duration=0.48)
+        mix.packet(start + step * 0.5, 0.105 if index % 4 else 0.15, -pan * 0.75, rng, index % 7 == 6)
 
-    bars = 6
-    for bar in range(bars):
-        t0 = bar * 4 * BEAT
-        # drums: boom-bap, hats on 8ths
-        for b in range(4):
-            bt = t0 + b * BEAT
-            if bar < 5 or b < 2:
-                mix.kick(bt, 1.0 if b % 2 == 0 else 0.82)
-            if b % 2 == 1 and bar >= 1 and (bar < 5 or b == 1):
-                mix.clap(bt, 0.62, rng)
-            if bar < 5:
-                mix.hat(bt, 0.28 if b % 2 == 0 else 0.22, False, rng)
-                mix.hat(bt + BEAT * 0.5, 0.18, b == 3, rng)
-        # extra kick on the and of 4 in the middle
-        if 1 <= bar <= 4:
-            mix.kick(t0 + 3.5 * BEAT, 0.55)
+    for pulse in range(11):
+        start = rhythmic_start + pulse * BEAT
+        absolute = start
+        bar = min(3, max(1, int(absolute / (4.0 * BEAT))))
+        root = ROOTS[bar]
+        mix.bass(start, root, 0.17 if pulse % 4 else 0.22, duration=0.54)
+        if pulse % 2 == 0:
+            mix.kick(start, 0.54 if pulse else 0.68)
+        else:
+            mix.tap(start, 0.16, rng)
 
-        # bass: root, fifth, octave, walking 8ths
-        root = bass_roots[bar]
-        fifth = root + 7
-        pattern = (
-            (0.0, root, 0.9),
-            (1.0, root, 0.7),
-            (1.5, fifth, 0.55),
-            (2.0, root, 0.85),
-            (3.0, root + 12, 0.5),
-            (3.5, fifth, 0.45),
-        )
-        if bar == 5:
-            pattern = ((0.0, root, 0.9), (2.0, root, 0.5))
-        for off, note, vel in pattern:
-            mix.tone(
-                t0 + off * BEAT,
-                0.42 if bar < 5 else 1.6,
-                midi_hz(note),
-                vel * 0.7,
-                0.0,
-                BASS,
-                attack=0.008,
-                decay=0.18,
-                sustain=0.35,
-                release=0.16,
-            )
+    # A second lift resolves into the repository/end card. Percussion stops;
+    # the logo motif returns higher and leaves a clean tail.
+    mix.sweep(9.42, 0.63, 0.19, rng)
+    mix.sub_drop(10.05, 0.36)
+    mix.kick(10.05, 0.62)
+    for start, note, pan, level, duration in (
+        (10.05, 71, -0.55, 0.12, 1.15),
+        (10.38, 78, 0.55, 0.105, 1.2),
+        (10.78, 83, 0.08, 0.078, 1.35),
+        (11.72, 73, -0.42, 0.066, 1.25),
+        (12.05, 78, 0.42, 0.058, 1.3),
+        (12.53, 83, 0.0, 0.052, 1.45),
+    ):
+        mix.glass(start, note, level, pan, duration)
+    mix.tap(10.69, 0.2, rng)
 
-        # piano chord on beat 1, echo on beat 3
-        chord_dur = 2.15 if bar < 5 else 3.4
-        for idx, note in enumerate(voicings[bar]):
-            pan = -0.35 + 0.35 * idx
-            mix.tone(
-                t0,
-                chord_dur,
-                midi_hz(note),
-                0.34,
-                pan,
-                PIANO,
-                attack=0.012,
-                decay=0.55,
-                sustain=0.42,
-                release=0.7,
-            )
-            mix.tone(
-                t0 + 0.09,
-                chord_dur,
-                midi_hz(note),
-                0.12,
-                -pan,
-                PIANO,
-                attack=0.02,
-                decay=0.5,
-                sustain=0.3,
-                release=0.7,
-            )
-
-    # Melody from bar 2, A-minor pentatonic hook.
-    # 8ths: A4 C5 E5 D5 | C5 A4 G4 E4 | A4 C5 D5 E5 | G5 E5 D5 C5 | A4 (hold)
-    hook = [
-        (8, 69, 0.5),
-        (8.5, 72, 0.5),
-        (9, 76, 0.5),
-        (9.5, 74, 0.5),
-        (10, 72, 0.5),
-        (10.5, 69, 0.5),
-        (11, 67, 0.5),
-        (11.5, 64, 0.5),
-        (12, 69, 0.5),
-        (12.5, 72, 0.5),
-        (13, 74, 0.5),
-        (13.5, 76, 0.5),
-        (14, 79, 0.5),
-        (14.5, 76, 0.5),
-        (15, 74, 0.5),
-        (15.5, 72, 0.5),
-        (16, 69, 2.4),
-    ]
-    for beat, note, dur_beats in hook:
-        start = beat * BEAT
-        mix.tone(
-            start,
-            dur_beats * BEAT * 0.92,
-            midi_hz(note),
-            0.46,
-            0.22,
-            LEAD,
-            attack=0.01,
-            decay=0.14,
-            sustain=0.55,
-            release=0.22,
-        )
-        # quiet octave echo
-        mix.tone(
-            start + 0.14,
-            dur_beats * BEAT * 0.7,
-            midi_hz(note),
-            0.12,
-            -0.4,
-            LEAD,
-            attack=0.02,
-            decay=0.2,
-            sustain=0.3,
-            release=0.3,
-        )
-
+    mix.add_room()
     write_wav(path, mix)
+
+
+def write_wav(path: str, mix: Mix) -> None:
+    # Gentle bus compression and saturation before the exact loudness pass in
+    # record. A linked detector keeps the stereo image from wandering.
+    envelope = 0.0
+    release = math.exp(-1.0 / (0.16 * SR))
+    processed_left = array.array("d", [0.0]) * N
+    processed_right = array.array("d", [0.0]) * N
+    peak = 1e-9
+    for index in range(N):
+        detector = max(abs(mix.left[index]), abs(mix.right[index]))
+        envelope = max(detector, envelope * release)
+        gain = 1.0
+        if envelope > 0.34:
+            gain = (0.34 + (envelope - 0.34) * 0.34) / envelope
+        left = math.tanh(mix.left[index] * gain * 1.38)
+        right = math.tanh(mix.right[index] * gain * 1.38)
+        processed_left[index] = left
+        processed_right[index] = right
+        peak = max(peak, abs(left), abs(right))
+
+    gain = 0.88 / peak
+    fade_in = int(0.065 * SR)
+    fade_out_start = int(13.15 * SR)
+    fade_out_length = N - fade_out_start
+    with wave.open(path, "wb") as output:
+        output.setnchannels(2)
+        output.setsampwidth(2)
+        output.setframerate(SR)
+        frames = bytearray()
+        for index in range(N):
+            fade = 1.0
+            if index < fade_in:
+                fade = smoothstep(index / fade_in)
+            elif index >= fade_out_start:
+                fade = smoothstep((N - index) / fade_out_length)
+            left = max(-1.0, min(1.0, processed_left[index] * gain * fade))
+            right = max(-1.0, min(1.0, processed_right[index] * gain * fade))
+            frames += struct.pack("<hh", int(left * 32_767), int(right * 32_767))
+        output.writeframes(frames)
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("usage: score.py OUT.wav", file=sys.stderr)
-        sys.exit(2)
+        raise SystemExit(2)
     compose(sys.argv[1])
