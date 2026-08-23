@@ -8,11 +8,11 @@ Network associates you to an AP. Wiretap shows who is on the wire.
 
 ## Watch it work
 
-https://github.com/user-attachments/assets/3928bb1d-844a-492f-8120-57ae63ff8ced
+https://github.com/user-attachments/assets/e72e82a6-91ad-4764-b880-9928f9c20f6a
 
 A 14-second soundtracked loop of the mark, the live panel, and the verbs. Its
-score is a Wiretap-specific cut in the same production family as OmaLab, with a
-different key, arrangement, and finish. Rebuild the stills and video with
+distinct cyber-electronic score rides a restrained 100 BPM pulse, with the
+synth layer opening as the end card arrives. Rebuild the stills and video with
 `docs/demo/record`; the one-minute live-take plan is in [docs/DEMO.md](docs/DEMO.md).
 
 ## Install

@@ -25,8 +25,9 @@ docs/demo/record
 
 `render-assets` draws `preview.png`, `docs/demo/thumbnail.png`, and the panel
 still from SVG. `record` pairs the visuals with `docs/demo/promo-score.m4a`,
-Wiretap's re-keyed and rearranged companion to the OmaLab promo cue, and
-encodes `docs/demo/wiretap-demo-loop.mp4` without re-encoding the score.
+Wiretap's CC0-licensed 100 BPM cyber-electronic cue, and encodes
+`docs/demo/wiretap-demo-loop.mp4` without re-encoding the score. Source and
+edit details live in `docs/demo/MUSIC.md`.
 
 ## One-minute live take (optional)
 
