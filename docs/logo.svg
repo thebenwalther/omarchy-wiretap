@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Wiretap</title>
+  <desc id="desc">Two parallel wires with a vertical tap needle touching the top wire.</desc>
+  <rect width="512" height="512" rx="96" fill="#16161e"/>
+  <circle cx="256" cy="256" r="210" fill="#1a1b26" stroke="#7aa2f7" stroke-width="10"/>
+  <g fill="none" stroke-linecap="round">
+    <path d="M96 256h320" stroke="#c0caf5" stroke-width="22"/>
+    <path d="M96 304h320" stroke="#c0caf5" stroke-opacity=".35" stroke-width="22"/>
+    <path d="M256 118v138" stroke="#7aa2f7" stroke-width="22"/>
+  </g>
+  <circle cx="256" cy="256" r="22" fill="#7aa2f7"/>
+</svg>

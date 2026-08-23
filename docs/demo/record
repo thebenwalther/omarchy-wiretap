@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+readonly PROJECT_ROOT
+DEMO="$PROJECT_ROOT/docs/demo"
+OUT="$DEMO/wiretap-demo-loop.mp4"
+
+command -v ffmpeg >/dev/null 2>&1 || {
+  printf 'record: ffmpeg is required\n' >&2
+  exit 1
+}
+
+"$DEMO/render-assets"
+
+# 14s silent loop: title → live panel card → end card.
+ffmpeg -y \
+  -loop 1 -t 3.6 -i "$DEMO/title-card.png" \
+  -loop 1 -t 7.2 -i "$PROJECT_ROOT/preview.png" \
+  -loop 1 -t 3.8 -i "$DEMO/end-card.png" \
+  -filter_complex "\
+    [0:v]scale=1920:1080,fps=30,format=yuv420p,settb=AVTB[v0]; \
+    [1:v]scale=1920:1080,fps=30,format=yuv420p,settb=AVTB[v1]; \
+    [2:v]scale=1920:1080,fps=30,format=yuv420p,settb=AVTB[v2]; \
+    [v0][v1]xfade=transition=fade:duration=0.35:offset=3.25[x1]; \
+    [x1][v2]xfade=transition=fade:duration=0.35:offset=10.05[video]" \
+  -map "[video]" -c:v libx264 -pix_fmt yuv420p -crf 18 -an -movflags +faststart "$OUT"
+
+printf 'wrote %s\n' "$OUT"

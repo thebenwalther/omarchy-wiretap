@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+  <title id="title">Wiretap — See who is talking</title>
+  <desc id="desc">Wiretap launch card with the tap mark, tagline, and live panel.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b0d16"/>
+      <stop offset="0.58" stop-color="#16161e"/>
+      <stop offset="1" stop-color="#1f2335"/>
+    </linearGradient>
+    <radialGradient id="blueGlow" cx="0" cy="0" r="1" gradientTransform="translate(250 220) rotate(38) scale(760 680)">
+      <stop offset="0" stop-color="#7aa2f7" stop-opacity=".30"/>
+      <stop offset=".55" stop-color="#7aa2f7" stop-opacity=".07"/>
+      <stop offset="1" stop-color="#7aa2f7" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="roseGlow" cx="0" cy="0" r="1" gradientTransform="translate(1560 870) rotate(-130) scale(780 620)">
+      <stop offset="0" stop-color="#f7768e" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#f7768e" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="52" height="52" patternUnits="userSpaceOnUse">
+      <path d="M52 0H0V52" fill="none" stroke="#7aa2f7" stroke-opacity=".045"/>
+    </pattern>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="28" stdDeviation="34" flood-color="#000" flood-opacity=".58"/>
+    </filter>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#background)"/>
+  <rect width="1920" height="1080" fill="url(#grid)"/>
+  <rect width="1920" height="1080" fill="url(#blueGlow)"/>
+  <rect width="1920" height="1080" fill="url(#roseGlow)"/>
+  <path d="M0 862C340 736 630 920 960 826c318-91 610-306 960-184v438H0Z" fill="#24283b" opacity=".42"/>
+
+  <g transform="translate(142 146)">
+    <circle cx="82" cy="82" r="80" fill="#24283b" stroke="#7aa2f7" stroke-width="3"/>
+    <g fill="none" stroke-linecap="round">
+      <path d="M38 82h88" stroke="#c0caf5" stroke-width="9"/>
+      <path d="M38 100h88" stroke="#c0caf5" stroke-opacity=".35" stroke-width="9"/>
+      <path d="M82 38v44" stroke="#7aa2f7" stroke-width="9"/>
+    </g>
+    <circle cx="82" cy="82" r="9" fill="#7aa2f7"/>
+
+    <text x="0" y="236" fill="#7aa2f7" font-family="JetBrainsMono Nerd Font, ui-monospace, monospace" font-size="25" font-weight="700" letter-spacing="8">OMARCHY PLUGIN · 1.1</text>
+    <text x="-2" y="354" fill="#c0caf5" font-family="Liberation Sans, ui-sans-serif, sans-serif" font-size="112" font-weight="700">Wiretap</text>
+    <text x="3" y="422" fill="#7aa2f7" font-family="JetBrainsMono Nerd Font, ui-monospace, monospace" font-size="35" font-weight="700" letter-spacing="6">SEE WHO IS TALKING</text>
+    <text x="3" y="492" fill="#a9b1d6" font-family="Liberation Sans, ui-sans-serif, sans-serif" font-size="29">Every connection, grouped by the app</text>
+    <text x="3" y="534" fill="#a9b1d6" font-family="Liberation Sans, ui-sans-serif, sans-serif" font-size="29">that owns it. Theme-aware. Observe-only.</text>
+
+    <g transform="translate(0 624)">
+      <g>
+        <rect width="212" height="78" rx="10" fill="#1f2335" stroke="#7aa2f7" stroke-width="2"/>
+        <text x="26" y="31" fill="#7aa2f7" font-family="JetBrainsMono Nerd Font, ui-monospace, monospace" font-size="16" font-weight="700">01</text>
+        <text x="26" y="58" fill="#c0caf5" font-family="JetBrainsMono Nerd Font, ui-monospace, monospace" font-size="17" font-weight="700">TALKING</text>
+      </g>
+      <path d="M230 39h34" stroke="#565f89" stroke-width="2"/>
+      <g transform="translate(282)">
+        <rect width="212" height="78" rx="10" fill="#1f2335" stroke="#f7768e" stroke-width="2"/>
+        <text x="26" y="31" fill="#f7768e" font-family="JetBrainsMono Nerd Font, ui-monospace, monospace" font-size="16" font-weight="700">02</text>
+        <text x="26" y="58" fill="#c0caf5" font-family="JetBrainsMono Nerd Font, ui-monospace, monospace" font-size="17" font-weight="700">WAITING</text>
+      </g>
+      <path d="M512 39h34" stroke="#565f89" stroke-width="2"/>
+      <g transform="translate(564)">
+        <rect width="236" height="78" rx="10" fill="#1f2335" stroke="#3b4261" stroke-width="2"/>
+        <text x="26" y="31" fill="#a9b1d6" font-family="JetBrainsMono Nerd Font, ui-monospace, monospace" font-size="16" font-weight="700">03</text>
+        <text x="26" y="58" fill="#c0caf5" font-family="JetBrainsMono Nerd Font, ui-monospace, monospace" font-size="17" font-weight="700">WHO OWNS IT</text>
+      </g>
+    </g>
+  </g>
+
+  <g transform="translate(1240 96)" filter="url(#shadow)">
+    <rect x="-28" y="-28" width="556" height="676" rx="24" fill="#0b0d16" stroke="#565f89" stroke-width="2"/>
+    <rect x="-12" y="-12" width="524" height="644" rx="16" fill="#16161e" stroke="#7aa2f7" stroke-opacity=".45"/>
+    <image href="../panel-live.png" xlink:href="../panel-live.png" x="0" y="0" width="500" height="572" preserveAspectRatio="xMidYMid meet"/>
+    <rect x="0" y="590" width="500" height="42" fill="#1f2335"/>
+    <text x="250" y="617" text-anchor="middle" fill="#7aa2f7" font-family="JetBrainsMono Nerd Font, ui-monospace, monospace" font-size="15" font-weight="700" letter-spacing="2">THEME-AWARE · APP FIRST · OBSERVE-ONLY</text>
+  </g>
+
+  <text x="142" y="1010" fill="#565f89" font-family="JetBrainsMono Nerd Font, ui-monospace, monospace" font-size="20">github.com/thebenwalther/omarchy-wiretap</text>
+</svg>

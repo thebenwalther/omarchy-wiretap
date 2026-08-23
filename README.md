@@ -1,8 +1,16 @@
 # Wiretap
 
+![Wiretap — See who is talking](docs/hero.svg)
+
 See who is talking. Wiretap groups every connection on this machine by the app that owns it.
 
 Network associates you to an AP. Wiretap shows who is on the wire.
+
+## Watch it work
+
+[![Watch the Wiretap promo](docs/demo/thumbnail.png)](docs/demo/wiretap-demo-loop.mp4)
+
+A 14-second silent loop of the mark, the panel, and the verbs. Rebuild stills and the loop with `docs/demo/record`. A one-minute live take is in [docs/DEMO.md](docs/DEMO.md).
 
 ## Install
 
@@ -86,6 +94,7 @@ ln -sfn "$HOME/Work/wiretap" \
 omarchy plugin enable io.github.thebenwalther.wiretap --section right
 omarchy plugin validate "$HOME/Work/wiretap"
 tests/all
+docs/demo/record
 ```
 
 ## License

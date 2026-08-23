@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="572" viewBox="0 0 500 572" role="img" aria-labelledby="title desc">
+  <title id="title">Wiretap panel</title>
+  <desc id="desc">A Tokyo Night themed Wiretap panel showing apps talking and one port open to the world.</desc>
+  <rect x=".75" y=".75" width="498.5" height="570.5" fill="#16161e" stroke="#7aa2f7" stroke-width="1.5"/>
+
+  <g font-family="JetBrainsMono Nerd Font, ui-monospace, monospace">
+    <rect x="16" y="16" width="468" height="86" rx="7" fill="#1f2335" stroke="#7aa2f7" stroke-opacity=".55"/>
+    <rect x="16" y="16" width="4" height="86" rx="2" fill="#7aa2f7"/>
+    <circle cx="54" cy="50" r="22" fill="#24283b" stroke="#7aa2f7" stroke-width="1.5"/>
+    <path d="M40 50h28" fill="none" stroke="#c0caf5" stroke-width="2.4" stroke-linecap="round"/>
+    <path d="M40 56h28" fill="none" stroke="#c0caf5" stroke-opacity=".35" stroke-width="2.4" stroke-linecap="round"/>
+    <path d="M54 36v14" fill="none" stroke="#7aa2f7" stroke-width="2.4" stroke-linecap="round"/>
+    <circle cx="54" cy="50" r="2.6" fill="#7aa2f7"/>
+    <text x="88" y="42" fill="#c0caf5" font-size="16" font-weight="700">Wiretap</text>
+    <text x="88" y="62" fill="#7aa2f7" font-size="9" font-weight="700" letter-spacing=".4">2 apps talking · 1 waiting for a connection</text>
+
+    <rect x="16" y="114" width="468" height="32" rx="4" fill="#1a1b26" stroke="#3b4261"/>
+    <text x="28" y="134" fill="#565f89" font-size="10">Find an app, site, or port…</text>
+
+    <g transform="translate(16 156)" font-size="9" font-weight="700">
+      <rect width="52" height="24" rx="3" fill="#1f2335" stroke="#3b4261"/>
+      <text x="26" y="16" text-anchor="middle" fill="#a9b1d6">All</text>
+      <rect x="58" width="72" height="24" rx="3" fill="#283457" stroke="#7aa2f7"/>
+      <text x="94" y="16" text-anchor="middle" fill="#7aa2f7">Talking</text>
+      <rect x="136" width="72" height="24" rx="3" fill="#1f2335" stroke="#3b4261"/>
+      <text x="172" y="16" text-anchor="middle" fill="#a9b1d6">Waiting</text>
+      <rect x="214" width="78" height="24" rx="3" fill="#1f2335" stroke="#3b4261"/>
+      <text x="253" y="16" text-anchor="middle" fill="#a9b1d6">Internet</text>
+      <rect x="298" width="120" height="24" rx="3" fill="#1f2335" stroke="#3b4261"/>
+      <text x="358" y="16" text-anchor="middle" fill="#a9b1d6">This computer</text>
+    </g>
+
+    <rect x="16" y="194" width="468" height="52" rx="6" fill="#1a2238" stroke="#7aa2f7" stroke-opacity=".45"/>
+    <rect x="16" y="194" width="4" height="52" rx="2" fill="#7aa2f7"/>
+    <rect x="30" y="206" width="28" height="28" rx="4" fill="#24283b" stroke="#7aa2f7" stroke-opacity=".4"/>
+    <text x="44" y="224" text-anchor="middle" fill="#7aa2f7" font-size="10" font-weight="700">C</text>
+    <text x="70" y="218" fill="#c0caf5" font-size="12" font-weight="700">ChatGPT</text>
+    <text x="70" y="234" fill="#565f89" font-size="9">4 connections · 22 KB sent · 8 KB received</text>
+
+    <rect x="16" y="252" width="468" height="48" rx="4" fill="#16161e"/>
+    <circle cx="40" cy="276" r="3.5" fill="#7aa2f7"/>
+    <text x="56" y="272" fill="#7aa2f7" font-size="12">https → 140.82.113.25</text>
+    <text x="56" y="288" fill="#565f89" font-size="9">on the internet · 22 KB sent</text>
+
+    <rect x="16" y="306" width="468" height="52" rx="6" fill="#1a1b26" stroke="#3b4261"/>
+    <rect x="30" y="318" width="28" height="28" rx="4" fill="#24283b" stroke="#3b4261"/>
+    <text x="44" y="336" text-anchor="middle" fill="#c0caf5" font-size="10" font-weight="700">c</text>
+    <text x="70" y="330" fill="#c0caf5" font-size="12" font-weight="700">chromium</text>
+    <text x="70" y="346" fill="#565f89" font-size="9">7 connections</text>
+
+    <rect x="16" y="366" width="468" height="52" rx="6" fill="#2a1d24" stroke="#f7768e" stroke-opacity=".5"/>
+    <rect x="16" y="366" width="4" height="52" rx="2" fill="#f7768e"/>
+    <rect x="30" y="378" width="28" height="28" rx="4" fill="#24283b" stroke="#f7768e" stroke-opacity=".45"/>
+    <text x="44" y="396" text-anchor="middle" fill="#f7768e" font-size="10" font-weight="700">D</text>
+    <text x="70" y="390" fill="#c0caf5" font-size="12" font-weight="700">dropbox</text>
+    <text x="70" y="406" fill="#565f89" font-size="9">2 connections</text>
+
+    <rect x="16" y="424" width="468" height="48" rx="4" fill="#16161e"/>
+    <circle cx="40" cy="448" r="3.5" fill="#f7768e"/>
+    <text x="56" y="444" fill="#f7768e" font-size="12">Open to the world on port 17500</text>
+    <text x="56" y="460" fill="#565f89" font-size="9">waiting for anyone</text>
+
+    <g transform="translate(16 492)" font-size="9" font-weight="700">
+      <rect width="92" height="28" rx="3" fill="#1f2335" stroke="#3b4261"/>
+      <text x="46" y="18" text-anchor="middle" fill="#c0caf5">Show all</text>
+      <rect x="100" width="110" height="28" rx="3" fill="#1f2335" stroke="#3b4261"/>
+      <text x="155" y="18" text-anchor="middle" fill="#c0caf5">Hide details</text>
+      <rect x="218" width="92" height="28" rx="3" fill="#1f2335" stroke="#3b4261"/>
+      <text x="264" y="18" text-anchor="middle" fill="#c0caf5">Copy list</text>
+    </g>
+  </g>
+</svg>

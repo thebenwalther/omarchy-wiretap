@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+  <title id="title">Wiretap</title>
+  <desc id="desc">Closing card with the Wiretap mark and repository URL.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b0d16"/>
+      <stop offset="1" stop-color="#1f2335"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="42%" r="45%">
+      <stop offset="0" stop-color="#7aa2f7" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#7aa2f7" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#background)"/>
+  <rect width="1920" height="1080" fill="url(#glow)"/>
+  <g transform="translate(960 390)">
+    <circle r="110" fill="#24283b" stroke="#7aa2f7" stroke-width="4"/>
+    <g fill="none" stroke-linecap="round">
+      <path d="M-70 0h140" stroke="#c0caf5" stroke-width="12"/>
+      <path d="M-70 24h140" stroke="#c0caf5" stroke-opacity=".35" stroke-width="12"/>
+      <path d="M0 -70v70" stroke="#7aa2f7" stroke-width="12"/>
+    </g>
+    <circle cy="0" r="12" fill="#7aa2f7"/>
+  </g>
+  <text x="960" y="580" text-anchor="middle" fill="#c0caf5" font-family="Liberation Sans, ui-sans-serif, sans-serif" font-size="92" font-weight="700">Wiretap</text>
+  <text x="960" y="650" text-anchor="middle" fill="#7aa2f7" font-family="JetBrainsMono Nerd Font, ui-monospace, monospace" font-size="28" font-weight="700" letter-spacing="6">SEE WHO IS TALKING</text>
+  <text x="960" y="920" text-anchor="middle" fill="#565f89" font-family="JetBrainsMono Nerd Font, ui-monospace, monospace" font-size="24">github.com/thebenwalther/omarchy-wiretap</text>
+</svg>
