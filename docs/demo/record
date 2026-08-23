@@ -14,28 +14,17 @@ command -v ffmpeg >/dev/null 2>&1 || {
 
 "$DEMO/render-assets"
 
+command -v python3 >/dev/null 2>&1 || {
+  printf 'record: python3 is required to render the score\n' >&2
+  exit 1
+}
+
 SCORE="$(mktemp --suffix=.wav)"
 VIDEO="$(mktemp --suffix=.mp4)"
 trap 'rm -f -- "$SCORE" "$VIDEO"' EXIT
 
-# Original 14s bed: low A drone, fifth, slow chorus, fade in/out. No third-party sample.
-ffmpeg -y -hide_banner -loglevel error \
-  -f lavfi -t 14.2 -i "sine=frequency=55:sample_rate=48000" \
-  -f lavfi -t 14.2 -i "sine=frequency=110:sample_rate=48000" \
-  -f lavfi -t 14.2 -i "sine=frequency=164.81:sample_rate=48000" \
-  -f lavfi -t 14.2 -i "sine=frequency=220:sample_rate=48000" \
-  -filter_complex "\
-    [0]volume=0.28[a0]; \
-    [1]volume=0.18,chorus=0.6:0.8:40:0.3:0.25:1.8[a1]; \
-    [2]volume=0.07,tremolo=f=0.18:d=0.45[a2]; \
-    [3]volume=0.04,afade=t=in:d=5[a3]; \
-    [a0][a1][a2][a3]amix=inputs=4:duration=longest:normalize=0, \
-      highpass=f=40,lowpass=f=3500, \
-      afade=t=in:st=0:d=1.1, \
-      afade=t=out:st=12.0:d=2.1, \
-      alimiter=limit=0.65, \
-      aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo" \
-  "$SCORE"
+# Original 14s piece: drums, bass, piano, melody. No third-party sample.
+python3 "$DEMO/score.py" "$SCORE"
 
 ffmpeg -y \
   -loop 1 -t 3.6 -i "$DEMO/title-card.png" \

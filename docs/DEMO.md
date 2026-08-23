@@ -24,7 +24,9 @@ docs/demo/record
 ```
 
 `render-assets` draws `preview.png`, `docs/demo/thumbnail.png`, and the panel
-still from SVG. `record` encodes `docs/demo/wiretap-demo-loop.mp4`.
+still from SVG. `record` renders an original 14-second score with
+`docs/demo/score.py` (drums, bass, piano, melody — no third-party sample) and
+encodes `docs/demo/wiretap-demo-loop.mp4`.
 
 ## One-minute live take (optional)
 

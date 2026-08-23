@@ -8,7 +8,7 @@ Network associates you to an AP. Wiretap shows who is on the wire.
 
 ## Watch it work
 
-https://github.com/user-attachments/assets/a8895310-d628-4a4c-9bcb-972dbbe9058d
+https://github.com/user-attachments/assets/e7e283ac-c24d-40be-9c66-28fa34105bc6
 
 A 14-second soundtracked loop of the mark, the panel, and the verbs. Rebuild stills and the loop with `docs/demo/record`. A one-minute live take is in [docs/DEMO.md](docs/DEMO.md).
 
