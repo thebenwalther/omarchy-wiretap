@@ -17,11 +17,6 @@ Item {
 
   readonly property real stroke: Math.max(1.2, iconSize * 0.08)
   readonly property real contact: Math.max(2.0, iconSize * 0.13)
-  readonly property color contactColor: root.pulse ? root.accent : root.color
-
-  Behavior on contactColor {
-    ColorAnimation { duration: 180 }
-  }
 
   Shape {
     anchors.fill: parent
@@ -48,7 +43,7 @@ Item {
     }
 
     ShapePath {
-      strokeColor: root.contactColor
+      strokeColor: contactDot.color
       strokeWidth: root.stroke
       capStyle: ShapePath.RoundCap
       fillColor: "transparent"
@@ -59,11 +54,16 @@ Item {
   }
 
   Rectangle {
+    id: contactDot
     width: root.contact
     height: root.contact
     radius: width / 2
-    color: root.contactColor
+    color: root.pulse ? root.accent : root.color
     x: (root.iconSize - width) / 2
     y: root.iconSize * 0.50 - height / 2
+
+    Behavior on color {
+      ColorAnimation { duration: 180 }
+    }
   }
 }
