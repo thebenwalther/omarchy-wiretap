@@ -9,13 +9,22 @@ import json
 import os
 import pwd
 import re
+import selectors
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 SS_TIMEOUT = 0.6
+# Bound each ss capture and the rows retained for QML. A host with a huge
+# socket table (or a local user flooding sockets) must not be able to grow
+# helper or shell memory without limit.
+SS_STDOUT_MAX_BYTES = 1 * 1024 * 1024
+SS_STDERR_MAX_BYTES = 16 * 1024
+SS_MAX_SOCKETS = 4096
+SS_READ_CHUNK = 65536
+TRUNCATED_WARNING = "socket table truncated"
 
 NETIDS = {
     "tcp",
@@ -424,10 +433,32 @@ def connection_id(conn: dict) -> str:
     )
 
 
-def parse_ss_output(text: str, default_netid: str | None = None) -> list[dict]:
+def clip_ss_text(text: str, max_bytes: int = SS_STDOUT_MAX_BYTES) -> tuple[str, bool]:
+    """Drop a torn last line once the byte budget is exhausted."""
+    if not text:
+        return "", False
+    # ss output is ASCII-heavy; character count is a tight upper bound on bytes.
+    if len(text) <= max_bytes:
+        return text, False
+    clipped = text[:max_bytes]
+    nl = clipped.rfind("\n")
+    if nl >= 0:
+        clipped = clipped[: nl + 1]
+    return clipped, True
+
+
+def parse_ss_output_limited(
+    text: str,
+    default_netid: str | None = None,
+    max_sockets: int | None = None,
+) -> tuple[list[dict], bool]:
+    limit = SS_MAX_SOCKETS if max_sockets is None else max_sockets
+    if limit < 0:
+        limit = 0
+    clipped, truncated = clip_ss_text(text or "")
     sockets: list[dict] = []
     current: dict | None = None
-    for line in (text or "").splitlines():
+    for line in clipped.splitlines():
         parsed = parse_socket_line(line, default_netid=default_netid)
         if parsed is None:
             continue
@@ -439,25 +470,160 @@ def parse_ss_output(text: str, default_netid: str | None = None) -> list[dict]:
                 if "bytesReceived" in info:
                     current["bytesReceived"] = info["bytesReceived"]
             continue
+        if len(sockets) >= limit:
+            truncated = True
+            break
         sockets.append(parsed)
         current = parsed
+    return sockets, truncated
+
+
+def parse_ss_output(
+    text: str,
+    default_netid: str | None = None,
+    max_sockets: int | None = None,
+) -> list[dict]:
+    sockets, _truncated = parse_ss_output_limited(
+        text, default_netid=default_netid, max_sockets=max_sockets
+    )
     return sockets
 
 
-def run_ss(args: list[str], ss_bin: str = "ss") -> tuple[int, str, str]:
+def _kill_process(proc: subprocess.Popen) -> None:
+    if proc.poll() is not None:
+        return
     try:
-        completed = subprocess.run(
+        proc.kill()
+    except OSError:
+        pass
+
+
+def _complete_lines(data: bytes) -> bytes:
+    if not data or data.endswith(b"\n"):
+        return data
+    nl = data.rfind(b"\n")
+    if nl < 0:
+        return b""
+    return data[: nl + 1]
+
+
+def _collect_capped(
+    proc: subprocess.Popen,
+    *,
+    max_stdout: int,
+    max_stderr: int,
+    timeout: float,
+) -> tuple[bytes, bytes, bool, bool]:
+    """Read pipes up to caps. Returns (stdout, stderr, truncated, timed_out)."""
+    stdout_stream = proc.stdout
+    stderr_stream = proc.stderr
+    if stdout_stream is None or stderr_stream is None:
+        _kill_process(proc)
+        try:
+            proc.wait(timeout=0.2)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        return b"", b"", False, False
+
+    out_fd = stdout_stream.fileno()
+    err_fd = stderr_stream.fileno()
+    os.set_blocking(out_fd, False)
+    os.set_blocking(err_fd, False)
+
+    sel = selectors.DefaultSelector()
+    sel.register(out_fd, selectors.EVENT_READ, "out")
+    sel.register(err_fd, selectors.EVENT_READ, "err")
+
+    out = bytearray()
+    err = bytearray()
+    truncated = False
+    timed_out = False
+    deadline = time.monotonic() + timeout
+
+    try:
+        while sel.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                _kill_process(proc)
+                break
+            events = sel.select(timeout=remaining)
+            if not events:
+                if proc.poll() is not None:
+                    deadline = min(deadline, time.monotonic() + 0.05)
+                continue
+            stop = False
+            for key, _mask in events:
+                try:
+                    chunk = os.read(key.fd, SS_READ_CHUNK)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    try:
+                        sel.unregister(key.fd)
+                    except (KeyError, ValueError):
+                        pass
+                    continue
+                buf = out if key.data == "out" else err
+                cap = max_stdout if key.data == "out" else max_stderr
+                room = cap - len(buf)
+                if room <= 0 or len(chunk) > room:
+                    if room > 0:
+                        buf.extend(chunk[:room])
+                    truncated = True
+                    _kill_process(proc)
+                    stop = True
+                    break
+                buf.extend(chunk)
+            if stop:
+                break
+    finally:
+        sel.close()
+        _kill_process(proc)
+        try:
+            proc.wait(timeout=0.2)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        try:
+            stdout_stream.close()
+        except OSError:
+            pass
+        try:
+            stderr_stream.close()
+        except OSError:
+            pass
+
+    return bytes(out), bytes(err), truncated, timed_out
+
+
+def run_ss(args: list[str], ss_bin: str = "ss") -> tuple[int, str, str, bool]:
+    try:
+        proc = subprocess.Popen(
             [ss_bin, *args],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=SS_TIMEOUT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+            close_fds=True,
         )
     except FileNotFoundError:
-        return 127, "", "ss not found"
-    except subprocess.TimeoutExpired:
-        return 124, "", "ss timed out"
-    return completed.returncode, completed.stdout or "", completed.stderr or ""
+        return 127, "", "ss not found", False
+    except OSError:
+        return 1, "", "ss failed", False
+
+    raw_out, raw_err, truncated, timed_out = _collect_capped(
+        proc,
+        max_stdout=SS_STDOUT_MAX_BYTES,
+        max_stderr=SS_STDERR_MAX_BYTES,
+        timeout=SS_TIMEOUT,
+    )
+    if timed_out:
+        return 124, "", "ss timed out", False
+    if truncated:
+        raw_out = _complete_lines(raw_out)
+    stdout = raw_out.decode("utf-8", errors="replace")
+    stderr = raw_err.decode("utf-8", errors="replace")
+    code = proc.returncode if proc.returncode is not None else 1
+    return code, stdout, stderr, truncated
 
 
 def join_info(base: list[dict], info_sockets: list[dict]) -> list[dict]:
@@ -650,6 +816,7 @@ def build_snapshot(
     warnings: list | None = None,
     error: str = "",
     enrich: bool = True,
+    truncated: bool = False,
 ) -> dict:
     table = services if services is not None else HARD_SERVICES
     kept = [s for s in sockets if should_keep(s, include_unix, include_system, include_unconnected_udp)]
@@ -756,7 +923,7 @@ def build_snapshot(
             totals["unowned"] += 1
 
     snap = empty_snapshot(error=error, elapsed_ms=elapsed_ms, warnings=warnings)
-    snap["partial"] = bool(error)
+    snap["partial"] = bool(error) or truncated
     snap["totals"] = totals
     snap["processes"] = processes
     return snap
@@ -769,56 +936,73 @@ def collect_sockets(
     info_text: str | None = None,
     unix_text: str | None = None,
     include_unix: bool = False,
-) -> tuple[list[dict], list[str], str]:
+) -> tuple[list[dict], list[str], str, bool]:
     warnings: list[str] = []
     error = ""
+    truncated = False
     sockets: list[dict] = []
 
     skip_followup = False
     if tunep_text is None:
-        code, out, err = run_ss(["-H", "-a", "-tunep"], ss_bin=ss_bin)
+        code, out, err, capped = run_ss(["-H", "-a", "-tunep"], ss_bin=ss_bin)
+        truncated = truncated or capped
         if code == 127:
-            return [], warnings, "iproute2 ss is not on PATH"
+            return [], warnings, "iproute2 ss is not on PATH", truncated
         if code == 124:
             error = "ss timed out"
             skip_followup = True
         elif code not in (0, 124) and not out.strip():
             error = (err.strip() or "ss failed") if err else "ss failed"
         tunep_text = out
-        if err.strip() and code not in (0,):
+        if err.strip() and code not in (0,) and not capped:
             warnings.append(err.strip())
 
-    sockets = parse_ss_output(tunep_text or "")
+    sockets, parse_truncated = parse_ss_output_limited(tunep_text or "")
+    truncated = truncated or parse_truncated
 
     if info_text is None:
         if skip_followup:
             info_text = ""
         else:
-            code, out, err = run_ss(["-H", "-a", "-tnep", "-i"], ss_bin=ss_bin)
-            if code == 0:
+            code, out, err, capped = run_ss(["-H", "-a", "-tnep", "-i"], ss_bin=ss_bin)
+            truncated = truncated or capped
+            if out.strip() and code != 127:
                 info_text = out
-            elif code not in (127,):
-                warnings.append("tcp info unavailable")
-                info_text = ""
+                if code not in (0,) and not capped:
+                    warnings.append("tcp info unavailable")
             else:
+                if code not in (127, 124):
+                    warnings.append("tcp info unavailable")
                 info_text = ""
     if info_text:
-        info_sockets = parse_ss_output(info_text, default_netid="tcp")
+        # Info rows are discarded after join; still cap so the temporary
+        # list cannot grow without bound.
+        info_sockets, _info_truncated = parse_ss_output_limited(
+            info_text, default_netid="tcp"
+        )
         sockets = join_info(sockets, info_sockets)
 
+    remaining = max(0, SS_MAX_SOCKETS - len(sockets))
     if include_unix:
         if unix_text is None:
             if skip_followup:
                 unix_text = ""
             else:
-                code, out, err = run_ss(["-H", "-a", "-xnp"], ss_bin=ss_bin)
-                unix_text = out if code in (0,) else ""
-                if code not in (0, 127):
+                code, out, err, capped = run_ss(["-H", "-a", "-xnp"], ss_bin=ss_bin)
+                truncated = truncated or capped
+                unix_text = out if (code == 0 or (capped and out)) else ""
+                if code not in (0, 127) and not (capped and out):
                     warnings.append("unix sockets unavailable")
         if unix_text:
-            sockets.extend(parse_ss_output(unix_text))
+            extra, unix_truncated = parse_ss_output_limited(
+                unix_text, max_sockets=remaining
+            )
+            sockets.extend(extra)
+            truncated = truncated or unix_truncated
 
-    return sockets, warnings, error
+    if truncated and TRUNCATED_WARNING not in warnings:
+        warnings.append(TRUNCATED_WARNING)
+    return sockets, warnings, error, truncated
 
 
 def snapshot_from_sources(**kwargs) -> dict:
@@ -826,7 +1010,7 @@ def snapshot_from_sources(**kwargs) -> dict:
     include_unix = bool(kwargs.get("include_unix"))
     include_system = bool(kwargs.get("include_system"))
     include_unconnected_udp = bool(kwargs.get("include_unconnected_udp"))
-    sockets, warnings, error = collect_sockets(
+    sockets, warnings, error, truncated = collect_sockets(
         ss_bin=kwargs.get("ss_bin") or "ss",
         tunep_text=kwargs.get("tunep_text"),
         info_text=kwargs.get("info_text"),
@@ -851,6 +1035,7 @@ def snapshot_from_sources(**kwargs) -> dict:
         warnings=warnings,
         error=error,
         enrich=kwargs.get("enrich", True),
+        truncated=truncated,
     )
 
 

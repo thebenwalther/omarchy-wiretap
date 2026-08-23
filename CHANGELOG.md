@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1
+
+- Cap each `ss` capture and the socket rows retained for QML so a huge table cannot grow helper or shell memory without bound.
+
 ## 1.1.0
 
 - Product stills, logo, marketplace preview, and a 14-second soundtracked promo loop.

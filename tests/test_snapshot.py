@@ -222,10 +222,116 @@ class MissingSsTests(unittest.TestCase):
 
 class VersionTests(unittest.TestCase):
     def test_version_constant(self):
-        self.assertEqual(wt.VERSION, "1.1.0")
+        self.assertEqual(wt.VERSION, "1.1.1")
 
     def test_main_version(self):
         self.assertEqual(wt.main(["--version"]), 0)
+
+
+def _socket_line(port: int, ino: int, comm: str = "x") -> str:
+    return (
+        f"tcp ESTAB 0 0 10.0.0.1:{port} 8.8.8.8:53 "
+        f'users:(("{comm}",pid=1,fd=3)) uid:1000 ino:{ino} sk:1 '
+        "cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/app-x.scope <->\n"
+    )
+
+
+def _write_fake_ss(directory: str, body: str) -> str:
+    path = Path(directory) / "fake-ss"
+    path.write_text("#!/usr/bin/env python3\n" + body, encoding="utf-8")
+    path.chmod(0o755)
+    return str(path)
+
+
+class SocketBudgetTests(unittest.TestCase):
+    def test_parse_stops_at_max_sockets(self):
+        text = "".join(_socket_line(1000 + i, i) for i in range(50))
+        sockets = wt.parse_ss_output(text, max_sockets=10)
+        self.assertEqual(len(sockets), 10)
+        sockets, truncated = wt.parse_ss_output_limited(text, max_sockets=10)
+        self.assertTrue(truncated)
+        self.assertEqual(len(sockets), 10)
+
+    def test_parse_clips_text_before_late_rows(self):
+        head = _socket_line(1, 1, comm="kept")
+        n = (wt.SS_STDOUT_MAX_BYTES // len(head)) + 40
+        text = head * n + _socket_line(65535, 999999, comm="AFTERCAP")
+        sockets, truncated = wt.parse_ss_output_limited(text)
+        self.assertTrue(truncated)
+        self.assertLessEqual(len(sockets), wt.SS_MAX_SOCKETS)
+        self.assertNotIn("AFTERCAP", {s["comm"] for s in sockets})
+
+    def test_snapshot_from_huge_table_is_partial(self):
+        extra = 25
+        text = "".join(_socket_line(1000 + i, i) for i in range(wt.SS_MAX_SOCKETS + extra))
+        snap = wt.snapshot_from_sources(
+            tunep_text=text,
+            info_text="",
+            enrich=False,
+            include_system=True,
+            include_unconnected_udp=True,
+        )
+        self.assertTrue(snap["partial"])
+        self.assertIn(wt.TRUNCATED_WARNING, snap["warnings"])
+        self.assertEqual(snap["totals"]["sockets"], wt.SS_MAX_SOCKETS)
+        self.assertEqual(
+            sum(len(p["connections"]) for p in snap["processes"]),
+            wt.SS_MAX_SOCKETS,
+        )
+
+    def test_small_snapshot_is_not_truncated(self):
+        snap = wt.snapshot_from_sources(
+            tunep_text=fixture("ss-tunep.txt"),
+            info_text=fixture("ss-tnep-i.txt"),
+            enrich=False,
+            include_system=True,
+            include_unconnected_udp=True,
+        )
+        self.assertFalse(snap["partial"])
+        self.assertNotIn(wt.TRUNCATED_WARNING, snap["warnings"])
+
+
+class RunSsCapTests(unittest.TestCase):
+    def test_stdout_byte_ceiling(self):
+        line = _socket_line(1, 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = _write_fake_ss(
+                tmp,
+                "import sys\n"
+                f"line = {line!r}\n"
+                "sys.stdout.write(line * 80000)\n"
+                "sys.stdout.flush()\n",
+            )
+            code, out, _err, truncated = wt.run_ss(["-H", "-a", "-tunep"], ss_bin=fake)
+            self.assertTrue(truncated)
+            self.assertLessEqual(len(out.encode("utf-8")), wt.SS_STDOUT_MAX_BYTES)
+            self.assertGreater(len(out), 0)
+            self.assertNotEqual(code, 124)
+
+    def test_timeout_discards_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = _write_fake_ss(tmp, "import time\ntime.sleep(5)\n")
+            code, out, err, truncated = wt.run_ss(["-H"], ss_bin=fake)
+            self.assertEqual(code, 124)
+            self.assertEqual(out, "")
+            self.assertFalse(truncated)
+            self.assertEqual(err, "ss timed out")
+
+    def test_snapshot_from_capped_ss(self):
+        line = _socket_line(1, 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = _write_fake_ss(
+                tmp,
+                "import sys\n"
+                f"line = {line!r}\n"
+                "sys.stdout.write(line * 80000)\n"
+                "sys.stdout.flush()\n",
+            )
+            snap = wt.snapshot_from_sources(ss_bin=fake, enrich=False, info_text="")
+            self.assertTrue(snap["partial"])
+            self.assertIn(wt.TRUNCATED_WARNING, snap["warnings"])
+            self.assertGreater(snap["totals"]["sockets"], 0)
+            self.assertLessEqual(snap["totals"]["sockets"], wt.SS_MAX_SOCKETS)
 
 
 class EnrichTests(unittest.TestCase):
