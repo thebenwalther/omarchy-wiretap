@@ -14,7 +14,29 @@ command -v ffmpeg >/dev/null 2>&1 || {
 
 "$DEMO/render-assets"
 
-# 14s silent loop: title → live panel card → end card.
+SCORE="$(mktemp --suffix=.wav)"
+VIDEO="$(mktemp --suffix=.mp4)"
+trap 'rm -f -- "$SCORE" "$VIDEO"' EXIT
+
+# Original 14s bed: low A drone, fifth, slow chorus, fade in/out. No third-party sample.
+ffmpeg -y -hide_banner -loglevel error \
+  -f lavfi -t 14.2 -i "sine=frequency=55:sample_rate=48000" \
+  -f lavfi -t 14.2 -i "sine=frequency=110:sample_rate=48000" \
+  -f lavfi -t 14.2 -i "sine=frequency=164.81:sample_rate=48000" \
+  -f lavfi -t 14.2 -i "sine=frequency=220:sample_rate=48000" \
+  -filter_complex "\
+    [0]volume=0.28[a0]; \
+    [1]volume=0.18,chorus=0.6:0.8:40:0.3:0.25:1.8[a1]; \
+    [2]volume=0.07,tremolo=f=0.18:d=0.45[a2]; \
+    [3]volume=0.04,afade=t=in:d=5[a3]; \
+    [a0][a1][a2][a3]amix=inputs=4:duration=longest:normalize=0, \
+      highpass=f=40,lowpass=f=3500, \
+      afade=t=in:st=0:d=1.1, \
+      afade=t=out:st=12.0:d=2.1, \
+      alimiter=limit=0.65, \
+      aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo" \
+  "$SCORE"
+
 ffmpeg -y \
   -loop 1 -t 3.6 -i "$DEMO/title-card.png" \
   -loop 1 -t 7.2 -i "$PROJECT_ROOT/preview.png" \
@@ -25,6 +47,10 @@ ffmpeg -y \
     [2:v]scale=1920:1080,fps=30,format=yuv420p,settb=AVTB[v2]; \
     [v0][v1]xfade=transition=fade:duration=0.35:offset=3.25[x1]; \
     [x1][v2]xfade=transition=fade:duration=0.35:offset=10.05[video]" \
-  -map "[video]" -c:v libx264 -pix_fmt yuv420p -crf 18 -an -movflags +faststart "$OUT"
+  -map "[video]" -c:v libx264 -pix_fmt yuv420p -crf 18 -an -movflags +faststart "$VIDEO"
+
+ffmpeg -y -hide_banner -loglevel error \
+  -i "$VIDEO" -i "$SCORE" \
+  -c:v copy -c:a aac -b:a 192k -shortest -movflags +faststart "$OUT"
 
 printf 'wrote %s\n' "$OUT"

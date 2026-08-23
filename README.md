@@ -8,9 +8,9 @@ Network associates you to an AP. Wiretap shows who is on the wire.
 
 ## Watch it work
 
-[![Watch the Wiretap promo](docs/demo/thumbnail.png)](docs/demo/wiretap-demo-loop.mp4)
+https://github.com/user-attachments/assets/a8895310-d628-4a4c-9bcb-972dbbe9058d
 
-A 14-second silent loop of the mark, the panel, and the verbs. Rebuild stills and the loop with `docs/demo/record`. A one-minute live take is in [docs/DEMO.md](docs/DEMO.md).
+A 14-second soundtracked loop of the mark, the panel, and the verbs. Rebuild stills and the loop with `docs/demo/record`. A one-minute live take is in [docs/DEMO.md](docs/DEMO.md).
 
 ## Install
 

@@ -2,6 +2,7 @@
 
 ## 1.1.0
 
+- Product stills, logo, marketplace preview, and a 14-second soundtracked promo loop.
 - Panel speaks in verbs: Talking, Waiting, Connecting, Finishing — not ESTAB or LISTEN.
 - Connection rows are destination-first sentences (`https → 140.82.113.25`, `Open to the world on port 22`).
 - Colors come from the current Omarchy theme: accent for talking, urgent for open-to-the-world.

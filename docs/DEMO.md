@@ -2,7 +2,10 @@
 
 The strongest demo is one beat: an app is talking, a port is open to the world,
 and you can tell which is which without reading `ss`. The complete story fits
-in about a minute. A 14-second silent loop lives in the repo for the README.
+in about a minute. A 14-second soundtracked loop lives in
+`docs/demo/wiretap-demo-loop.mp4`. The README plays it inline from a GitHub
+user-attachment URL. Rebuild the local file with `docs/demo/record`; re-upload
+it if the README copy should change.
 
 ## Logo
 
